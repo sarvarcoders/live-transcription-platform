@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { Mic, Radio, Square } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
@@ -71,18 +70,6 @@ export function HostControls({
             ? `${copy.currentStatus}: ${status}.`
             : undefined;
 
-  useEffect(() => {
-    console.info("[frontend] broadcaster controls state", {
-      hasSession,
-      hasBroadcasterToken,
-      connectionState,
-      status,
-      isRecording,
-      canStart,
-      startDisabledReason
-    });
-  }, [canStart, connectionState, hasBroadcasterToken, hasSession, isRecording, startDisabledReason, status]);
-
   const statusTone =
     status === "recording"
       ? "border-rose-200 bg-rose-50 text-rose-700"
@@ -93,12 +80,7 @@ export function HostControls({
           : "border-slate-200 bg-white text-slate-600";
 
   return (
-    <section className="grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-      <div>
-        <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.broadcasterControls}</h2>
-        <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">{copy.hostDescription}</p>
-      </div>
-
+    <section className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
         {copy.sessionTitle}
         <Input
@@ -119,43 +101,31 @@ export function HostControls({
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}
 
-      <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-950/60">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{copy.broadcasterStatus}</span>
-          <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${statusTone}`}>
-            <span className={`h-2 w-2 rounded-full ${isRecording ? "animate-pulse bg-rose-500" : isConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-            {status}
-          </span>
-        </div>
-        <div className="grid gap-2">
-          <Button type="button" onClick={onCreateSession} disabled={!canCreate} className="w-full">
-            {isCreating ? copy.creatingSession : hasSession ? copy.sessionReady : copy.createSession}
-          </Button>
-
-          {isRecording ? (
-            <Button type="button" variant="danger" onClick={onStopRecording} className="w-full">
-              <Square className="h-4 w-4" />
-              {copy.stopRecording}
-            </Button>
-          ) : (
-            <Button type="button" onClick={onStartRecording} disabled={!canStart} className="w-full">
-              <Mic className="h-4 w-4" />
-              {copy.startMicrophone}
-            </Button>
-          )}
-        </div>
-        {hasSession && !isRecording && !isConnected ? (
-          <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{copy.waitingConnection}</p>
-        ) : null}
-        {!canStart && hasSession && !isRecording ? (
-          <p className="mt-2 text-xs text-slate-600 dark:text-slate-400">{copy.startDisabled}: {startDisabledReason}</p>
-        ) : null}
-        {!hasSession && error ? (
-          <p className="mt-2 text-xs text-rose-700 dark:text-rose-300">{copy.createNewSession}</p>
-        ) : null}
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{copy.status}</span>
+        <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${statusTone}`}>
+          <span className={`h-2 w-2 rounded-full ${isRecording ? "animate-pulse bg-rose-500" : isConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
+          {status}
+        </span>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="grid gap-2">
+        <Button type="button" onClick={onCreateSession} disabled={!canCreate} className="w-full">
+          {isCreating ? copy.creatingSession : hasSession ? copy.sessionReady : copy.createSession}
+        </Button>
+
+        {isRecording ? (
+          <Button type="button" variant="danger" onClick={onStopRecording} className="w-full">
+            <Square className="h-4 w-4" />
+            {copy.stopRecording}
+          </Button>
+        ) : (
+          <Button type="button" onClick={onStartRecording} disabled={!canStart} className="w-full">
+            <Mic className="h-4 w-4" />
+            {copy.startMicrophone}
+          </Button>
+        )}
+
         {session ? (
           <Button type="button" variant="secondary" onClick={onLeaveSession} className="w-full">
             <Radio className="h-4 w-4" />
@@ -163,6 +133,16 @@ export function HostControls({
           </Button>
         ) : null}
       </div>
+
+      {hasSession && !isRecording && !isConnected ? (
+        <p className="text-xs text-amber-700 dark:text-amber-300">{copy.waitingConnection}</p>
+      ) : null}
+      {!canStart && hasSession && !isRecording ? (
+        <p className="text-xs text-slate-600 dark:text-slate-400">{copy.startDisabled}: {startDisabledReason}</p>
+      ) : null}
+      {!hasSession && error ? (
+        <p className="text-xs text-rose-700 dark:text-rose-300">{copy.createNewSession}</p>
+      ) : null}
     </section>
   );
 }

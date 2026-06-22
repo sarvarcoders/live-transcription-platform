@@ -1,16 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, History } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import { uiCopy, type UiLocale, type UiTheme } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
 import { useLiveTranscription } from "@/hooks/use-live-transcription";
 import { ConnectionStatus } from "./connection-status";
 import { ExportControls } from "./export-controls";
 import { type BroadcasterStatus, HostControls } from "./host-controls";
-import { LatencyDashboard } from "./latency-dashboard";
 import { PreferenceControls } from "./preference-controls";
-import { SessionDashboard } from "./session-dashboard";
 import { SubtitlePanel } from "./subtitle-panel";
 import { TranscriptHistory } from "./transcript-history";
 import { ViewerControls } from "./viewer-controls";
@@ -61,6 +59,7 @@ export function TranscriptionStudio() {
   const [isCreating, setIsCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [hasRecorded, setHasRecorded] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
 
   const live = useLiveTranscription();
   const copy = uiCopy[locale];
@@ -171,27 +170,35 @@ export function TranscriptionStudio() {
     live.joinSession(joinSessionId);
   }
 
-  function joinDashboardSession(sessionId: string) {
-    setMode("viewer");
-    setJoinSessionId(sessionId);
-    setFormError(null);
-    live.clearError();
-    live.joinSession(sessionId);
-  }
-
   function switchMode(nextMode: Mode) {
     live.leaveSession();
     setFormError(null);
     setMode(nextMode);
   }
 
+  if (focusMode) {
+    return (
+      <main className="min-h-screen bg-slate-950 p-2 sm:p-4">
+        <SubtitlePanel
+          segments={live.segments}
+          interimSegment={live.interimSegment}
+          isRecording={live.isRecording}
+          connectionState={live.connectionState}
+          session={live.session}
+          copy={copy}
+          isFocusMode
+          onToggleFocus={() => setFocusMode(false)}
+        />
+      </main>
+    );
+  }
+
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-[96rem] gap-5 px-4 py-5 sm:px-6 lg:px-8">
-      <header className="flex flex-col justify-between gap-4 rounded-2xl border border-white/70 bg-white/75 p-5 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
+    <main className="mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5">
+      <header className="flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-cyan-300">{copy.appEyebrow}</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-4xl">{copy.appTitle}</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">{copy.appDescription}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-cyan-300">{copy.appEyebrow}</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">{copy.appTitle}</h1>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <PreferenceControls
@@ -202,35 +209,39 @@ export function TranscriptionStudio() {
             onThemeChange={setTheme}
           />
           <ConnectionStatus state={live.connectionState} message={live.connectionMessage} copy={copy} />
+          <button
+            type="button"
+            onClick={() => setFocusMode(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:ring-brand-500/20"
+          >
+            <Maximize2 className="h-4 w-4" />
+            {copy.focusMode}
+          </button>
         </div>
       </header>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[18.5rem_minmax(0,1fr)_20rem] 2xl:grid-cols-[20rem_minmax(0,1fr)_22rem]">
-        <aside className="order-2 grid content-start gap-4 lg:order-1 lg:sticky lg:top-5">
+      <div className="grid items-start gap-3 lg:grid-cols-[17.5rem_minmax(0,1fr)_18.5rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_19.5rem]">
+        <aside className="order-2 grid content-start gap-3 lg:order-1 lg:sticky lg:top-3">
           <div className="rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-            <div className="mb-3">
-              <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.broadcasterControls}</h2>
-              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">{copy.broadcasterDescription}</p>
-            </div>
             <div className="grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-100/70 p-1 dark:border-slate-700 dark:bg-slate-950/70">
-            <button
-              type="button"
-              onClick={() => switchMode("broadcaster")}
-              className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                mode === "broadcaster" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
-              }`}
-            >
-              {copy.broadcasterMode}
-            </button>
-            <button
-              type="button"
-              onClick={() => switchMode("viewer")}
-              className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                mode === "viewer" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
-              }`}
-            >
-              {copy.viewerMode}
-            </button>
+              <button
+                type="button"
+                onClick={() => switchMode("broadcaster")}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  mode === "broadcaster" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
+                }`}
+              >
+                {copy.broadcasterMode}
+              </button>
+              <button
+                type="button"
+                onClick={() => switchMode("viewer")}
+                className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
+                  mode === "viewer" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
+                }`}
+              >
+                {copy.viewerMode}
+              </button>
             </div>
           </div>
 
@@ -270,9 +281,6 @@ export function TranscriptionStudio() {
             </div>
           ) : null}
 
-          <LatencyDashboard samples={live.latencySamples} copy={copy} />
-
-          <SessionDashboard activeSessionId={live.session?.id} onJoinSession={joinDashboardSession} copy={copy} />
         </aside>
 
         <div className="order-1 lg:order-2">
@@ -283,43 +291,13 @@ export function TranscriptionStudio() {
             connectionState={live.connectionState}
             session={live.session}
             copy={copy}
+            onToggleFocus={() => setFocusMode(true)}
           />
         </div>
 
-        <aside className="order-3 grid content-start gap-4 lg:sticky lg:top-5">
-          <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.history}</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">{copy.historyDescription}</p>
-              </div>
-              <History className="h-5 w-5 text-brand-600" />
-            </div>
-          </section>
+        <aside className="order-3 grid content-start gap-3 lg:sticky lg:top-3">
           <ExportControls session={live.session} segments={live.segments} copy={copy} />
           <TranscriptHistory segments={live.segments} copy={copy} />
-          <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
-              <Activity className="h-4 w-4 text-brand-600" />
-              {copy.sessionStatus}
-            </div>
-            <div className="mt-3 grid gap-2 text-sm text-slate-600 dark:text-slate-300">
-              <div className="flex items-center justify-between gap-3">
-                <span>{copy.mode}</span>
-                <span className="font-semibold capitalize text-slate-900 dark:text-white">
-                  {mode === "broadcaster" ? copy.broadcasterMode : copy.viewerMode}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>{copy.recording}</span>
-                <span className="font-semibold text-slate-900 dark:text-white">{live.isRecording ? copy.live : copy.off}</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>{copy.segments}</span>
-                <span className="font-semibold text-slate-900 dark:text-white">{live.segments.length}</span>
-              </div>
-            </div>
-          </section>
         </aside>
       </div>
     </main>

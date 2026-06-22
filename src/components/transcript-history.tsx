@@ -8,18 +8,17 @@ import type { TranscriptSegment } from "@/shared/types";
 
 export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegment[]; copy: UiCopy }) {
   return (
-    <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-      <div className="mb-4 flex items-center justify-between gap-3">
+    <section className="rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.history}</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">{copy.transcriptHistoryDescription}</p>
+          <h2 className="text-sm font-semibold text-slate-950 dark:text-white">{copy.history}</h2>
         </div>
-        <FileText className="h-5 w-5 text-brand-600" />
+        <FileText className="h-4 w-4 text-brand-600" />
       </div>
 
-      <div className="grid max-h-[calc(100vh-25rem)] min-h-[14rem] gap-3 overflow-auto pr-1 lg:max-h-[32rem]">
+      <div className="grid max-h-[calc(100vh-11rem)] min-h-[14rem] gap-2 overflow-auto pr-1">
         {segments.length === 0 ? (
-          <div className="grid min-h-[12rem] place-items-center rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
+          <div className="grid min-h-[12rem] place-items-center rounded-xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-400">
             <div>
               <p className="font-semibold text-slate-700 dark:text-slate-200">{copy.transcriptWillAppear}</p>
               <p className="mt-1">{copy.finalSaved}</p>
@@ -27,7 +26,7 @@ export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegm
           </div>
         ) : (
           segments.map((segment, index) => (
-            <article key={segment.id} className="rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/50">
+            <article key={segment.id} className="rounded-xl border border-slate-200/80 bg-white/80 p-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-950/50">
               <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>#{index + 1}</span>
                 <span>{formatTime(segment.startedAt)}</span>

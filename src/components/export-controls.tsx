@@ -16,12 +16,9 @@ export function ExportControls({ session, segments, copy }: ExportControlsProps)
   const hasSegments = segments.some((segment) => segment.isFinal);
 
   return (
-    <section className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-      <div>
-        <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.export}</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{copy.exportDescription}</p>
-      </div>
-      <div className="grid gap-2">
+    <section className="grid gap-2 rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+      <h2 className="text-sm font-semibold text-slate-950 dark:text-white">{copy.export}</h2>
+      <div className="grid grid-cols-2 gap-2">
         <Button
           type="button"
           variant="secondary"

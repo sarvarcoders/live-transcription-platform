@@ -87,7 +87,9 @@ export const uiCopy = {
     sessionDashboardDescription: "Monitor active rooms and join as a viewer from this screen.",
     refreshSessions: "Refresh sessions",
     noSessions: "No sessions yet.",
-    updated: "Updated"
+    updated: "Updated",
+    focusMode: "Focus mode",
+    exitFocus: "Exit focus"
   },
   uz: {
     appEyebrow: "Deepgram transkripsiya paneli",
@@ -174,7 +176,9 @@ export const uiCopy = {
     sessionDashboardDescription: "Faol xonalarni kuzating va viewer sifatida kiring.",
     refreshSessions: "Sessionlarni yangilash",
     noSessions: "Hali session yo‘q.",
-    updated: "Yangilandi"
+    updated: "Yangilandi",
+    focusMode: "Focus rejim",
+    exitFocus: "Focusdan chiqish"
   }
 } as const;
 
