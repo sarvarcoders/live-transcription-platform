@@ -1,11 +1,12 @@
 import { z } from "zod";
 
 function isUrlList(value: string) {
-  return value
+  const origins = value
     .split(",")
     .map((origin) => origin.trim())
-    .filter(Boolean)
-    .every((origin) => z.string().url().safeParse(origin).success);
+    .filter(Boolean);
+
+  return origins.length > 0 && origins.every((origin) => z.string().url().safeParse(origin).success);
 }
 
 const envSchema = z.object({
@@ -38,9 +39,13 @@ function describeSecret(value: string | undefined, placeholder: string) {
 export function getEnvDiagnostics() {
   const deepgram = describeSecret(process.env.DEEPGRAM_API_KEY, "your_deepgram_api_key");
   const openai = describeSecret(process.env.OPENAI_API_KEY, "your_openai_api_key");
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
   const issues: string[] = [];
 
   if (!deepgram.present) issues.push("Deepgram API key is missing");
+  if (!isUrlList(appUrl)) {
+    issues.push("NEXT_PUBLIC_APP_URL must include protocol, for example https://live-transcription-platform-production.up.railway.app");
+  }
 
   return {
     ok: issues.length === 0,
@@ -53,7 +58,7 @@ export function getEnvDiagnostics() {
       ...openai,
       plausibleFormat: openai.present ? openai.preview.startsWith("sk-") : false
     },
-    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    appUrl,
     deepgramModel: process.env.DEEPGRAM_MODEL ?? "nova-3",
     deepgramEndpointingMs: process.env.DEEPGRAM_ENDPOINTING_MS ?? 60,
     openaiTranslationEnabled: false,

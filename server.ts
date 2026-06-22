@@ -8,8 +8,8 @@ import { logEnvDiagnostics } from "./src/server/env";
 loadEnvConfig(process.cwd());
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? "0.0.0.0";
-const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const port = Number(process.env.PORT || 3000);
+const host = "0.0.0.0";
 
 function getAllowedOrigins() {
   const configuredOrigins = process.env.NEXT_PUBLIC_APP_URL
@@ -24,7 +24,7 @@ function getAllowedOrigins() {
 async function bootstrap() {
   logEnvDiagnostics("server startup");
 
-  const app = next({ dev, hostname, port });
+  const app = next({ dev, hostname: host, port });
   const handle = app.getRequestHandler();
 
   await app.prepare();
@@ -48,8 +48,8 @@ async function bootstrap() {
 
   registerSocketHandlers(io);
 
-  httpServer.listen(port, hostname, () => {
-    console.log(`> Ready on http://${hostname}:${port}`);
+  httpServer.listen(port, host, () => {
+    console.log(`> Ready on http://${host}:${port}`);
   });
 }
 

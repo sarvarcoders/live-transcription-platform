@@ -58,7 +58,7 @@ Environment variable reference:
 
 - `DEEPGRAM_API_KEY`: Required. Server-side Deepgram API key used for streaming transcription.
 - `OPENAI_API_KEY`: Optional in the current build because OpenAI translation is disabled. Keep unset unless translation is re-enabled.
-- `NEXT_PUBLIC_APP_URL`: Required in production. Set to the public Railway or Render URL, for example `https://your-app.up.railway.app` or `https://your-app.onrender.com`. Comma-separated origins are supported if you need multiple allowed Socket.io origins.
+- `NEXT_PUBLIC_APP_URL`: Required in production. Set to the public Railway or Render URL with protocol, for example `https://your-app.up.railway.app` or `https://your-app.onrender.com`. `your-app.up.railway.app` without `https://` is invalid. Comma-separated origins are supported if you need multiple allowed Socket.io origins.
 - `PORT`: Local development port. Railway and Render inject this automatically in production.
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
@@ -106,7 +106,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - Build command: `npm run build`
    - Start command: `npm run start`
    - Port: use Railway's injected `PORT`; do not hard-code one.
-6. Deploy, then update `NEXT_PUBLIC_APP_URL` to the final Railway public domain if Railway generated it after the first deploy.
+6. Deploy, then update `NEXT_PUBLIC_APP_URL` to the final Railway public domain if Railway generated it after the first deploy. Include `https://`.
 
 ### Render
 
