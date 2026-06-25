@@ -33,6 +33,11 @@ export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegm
                 <span>{getLanguageLabel(segment.sourceLanguage)}</span>
               </div>
               <p className="text-sm font-medium leading-6 text-slate-950 dark:text-slate-100">{segment.text}</p>
+              {segment.translatedText ? (
+                <p className="mt-2 border-t border-slate-200/70 pt-2 text-sm font-medium leading-6 text-brand-700 dark:border-slate-700 dark:text-cyan-200">
+                  {segment.translatedText}
+                </p>
+              ) : null}
             </article>
           ))
         )}

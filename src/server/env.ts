@@ -61,7 +61,7 @@ export function getEnvDiagnostics() {
     appUrl,
     deepgramModel: process.env.DEEPGRAM_MODEL ?? "nova-3",
     deepgramEndpointingMs: process.env.DEEPGRAM_ENDPOINTING_MS ?? 60,
-    openaiTranslationEnabled: false,
+    openaiTranslationEnabled: openai.present,
     openaiTimeoutMs: process.env.OPENAI_TRANSLATION_TIMEOUT_MS ?? 1800,
     openaiMaxTokens: process.env.OPENAI_TRANSLATION_MAX_TOKENS ?? 70
   };

@@ -6,7 +6,7 @@ export const uiCopy = {
     appEyebrow: "Deepgram transcription workspace",
     appTitle: "Live speech transcript",
     appDescription:
-      "One broadcaster streams microphone audio while unlimited viewer screens receive Deepgram transcripts instantly. OpenAI translation is disabled.",
+      "One broadcaster streams microphone audio while viewer screens receive Deepgram transcripts and OpenAI translations instantly.",
     uiLanguage: "UI language",
     english: "English",
     uzbek: "Uzbek",
@@ -21,6 +21,7 @@ export const uiCopy = {
     sessionTitle: "Session title",
     sessionTitlePlaceholder: "Daily standup, webinar, interview...",
     speakerLanguage: "Speaker language",
+    targetLanguage: "Translation language",
     broadcasterStatus: "Broadcaster status",
     createSession: "Create session",
     creatingSession: "Creating session...",
@@ -95,7 +96,7 @@ export const uiCopy = {
     appEyebrow: "Deepgram transkripsiya paneli",
     appTitle: "Jonli nutq transkripti",
     appDescription:
-      "Bitta broadcaster mikrofon audiosini uzatadi, viewer ekranlar esa Deepgram transkriptlarini darhol oladi. OpenAI tarjima hozircha o‘chirilgan.",
+      "Bitta broadcaster mikrofon audiosini uzatadi, viewer ekranlar esa Deepgram transkriptlari va OpenAI tarjimalarini darhol oladi.",
     uiLanguage: "Interfeys tili",
     english: "Inglizcha",
     uzbek: "O‘zbekcha",
@@ -110,6 +111,7 @@ export const uiCopy = {
     sessionTitle: "Session nomi",
     sessionTitlePlaceholder: "Kunlik uchrashuv, webinar, suhbat...",
     speakerLanguage: "Nutq tili",
+    targetLanguage: "Tarjima tili",
     broadcasterStatus: "Broadcaster holati",
     createSession: "Session yaratish",
     creatingSession: "Session yaratilmoqda...",

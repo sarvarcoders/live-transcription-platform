@@ -24,6 +24,12 @@ const AUDIO_CHUNK_MS = 75;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 
 const STALE_SESSION_ERROR_CODES = new Set(["SESSION_HOST_DENIED", "SESSION_NOT_FOUND"]);
+const TRANSLATION_ERROR_CODES = new Set([
+  "OPENAI_NOT_CONFIGURED",
+  "OPENAI_AUTH_INVALID",
+  "OPENAI_QUOTA_EXCEEDED",
+  "OPENAI_TRANSLATION_FAILED"
+]);
 
 function getRecorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -210,6 +216,8 @@ export function useLiveTranscription() {
         clearLocalSessionState(
           "The saved live session is no longer available. The server may have restarted or the session expired. Please create a new session."
         );
+      } else if (TRANSLATION_ERROR_CODES.has(code)) {
+        setConnectionMessage(message);
       } else {
         setError(message);
         if (
@@ -221,13 +229,13 @@ export function useLiveTranscription() {
         ) {
           stopLocalRecording();
         }
+        console.error("[frontend] connectionState -> error", {
+          eventName: "server:error",
+          code,
+          message
+        });
+        setConnectionState("error");
       }
-      console.error("[frontend] connectionState -> error", {
-        eventName: "server:error",
-        code,
-        message
-      });
-      setConnectionState("error");
     });
 
     socketRef.current = socket;

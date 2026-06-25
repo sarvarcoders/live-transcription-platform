@@ -54,6 +54,7 @@ export function TranscriptionStudio() {
   const [locale, setLocale] = useState<UiLocale>("en");
   const [theme, setTheme] = useState<UiTheme>("light");
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>("en");
+  const [targetLanguage, setTargetLanguage] = useState<LanguageCode>("uz");
   const [mode, setMode] = useState<Mode>("broadcaster");
   const [joinSessionId, setJoinSessionId] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -117,6 +118,7 @@ export function TranscriptionStudio() {
     console.info("[frontend] Create session clicked", {
       title,
       sourceLanguage,
+      targetLanguage,
       currentSessionId: live.session?.id,
       connectionState: live.connectionState,
       hasBroadcasterToken: live.hasBroadcasterToken
@@ -129,7 +131,7 @@ export function TranscriptionStudio() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, sourceLanguage })
+        body: JSON.stringify({ title, sourceLanguage, targetLanguage })
       });
 
       const payload = (await response.json()) as CreateSessionResponse;
@@ -249,6 +251,7 @@ export function TranscriptionStudio() {
             <HostControls
               title={title}
               sourceLanguage={sourceLanguage}
+              targetLanguage={targetLanguage}
               session={live.session}
               isCreating={isCreating}
               isRecording={live.isRecording}
@@ -259,6 +262,7 @@ export function TranscriptionStudio() {
               copy={copy}
               onTitleChange={setTitle}
               onSourceLanguageChange={setSourceLanguage}
+              onTargetLanguageChange={setTargetLanguage}
               onCreateSession={createSession}
               onStartRecording={live.startRecording}
               onStopRecording={live.stopRecording}

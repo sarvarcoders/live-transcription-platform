@@ -10,6 +10,7 @@ import type {
 } from "@/shared/types";
 import { sessionStore } from "./sessions";
 import { DeepgramStream } from "./deepgram";
+import { classifyTranslationError, streamTranslateTranscript } from "./translator";
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type TranslationSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -105,6 +106,74 @@ function baseMetrics(sessionId: string, deepgramReceivedAt: number): LatencyMetr
   };
 }
 
+function translateFinalSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+  const translationStartedAt = Date.now();
+  let firstTokenAt: number | undefined;
+
+  streamTranslateTranscript({
+    text: segment.text,
+    sourceLanguage: segment.sourceLanguage,
+    targetLanguage: segment.targetLanguage,
+    onFirstToken: () => {
+      firstTokenAt = Date.now();
+    },
+    onToken: (partialText) => {
+      emitSegment(io, sessionId, {
+        ...segment,
+        translatedText: partialText,
+        translationStatus: "pending",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt,
+          firstTokenAt,
+          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined
+        }
+      });
+    }
+  })
+    .then((translatedText) => {
+      const translationCompletedAt = Date.now();
+      const translatedSegment: TranscriptSegment = {
+        ...segment,
+        translatedText,
+        translationStatus: "complete",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt,
+          firstTokenAt,
+          translationCompletedAt,
+          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined,
+          openaiTotalLatencyMs: translationCompletedAt - translationStartedAt
+        }
+      };
+      sessionStore.addTranscript(sessionId, translatedSegment);
+      emitSegment(io, sessionId, translatedSegment);
+    })
+    .catch((error: unknown) => {
+      const classifiedError = classifyTranslationError(error);
+      const failedSegment: TranscriptSegment = {
+        ...segment,
+        translatedText: classifiedError.message,
+        translationStatus: "error",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt
+        }
+      };
+      console.warn("[socket] translation failed", {
+        sessionId,
+        code: classifiedError.code,
+        message: classifiedError.message
+      });
+      sessionStore.addTranscript(sessionId, failedSegment);
+      emitSegment(io, sessionId, failedSegment);
+      io.to(roomName(sessionId)).emit("server:error", {
+        code: classifiedError.code,
+        message: classifiedError.message
+      });
+    });
+}
+
 export function registerSocketHandlers(io: TranslationServer) {
   io.on("connection", (socket) => {
     console.info("[socket] connected", { socketId: socket.id });
@@ -189,8 +258,9 @@ export function registerSocketHandlers(io: TranslationServer) {
             sessionId,
             text: transcript.text,
             sourceLanguage: liveSession.sourceLanguage,
-            targetLanguage: liveSession.sourceLanguage,
+            targetLanguage: liveSession.targetLanguage,
             isFinal: transcript.isFinal,
+            translationStatus: transcript.isFinal ? "pending" : undefined,
             confidence: transcript.confidence,
             startedAt: new Date().toISOString(),
             completedAt: transcript.isFinal ? new Date().toISOString() : undefined,
@@ -199,6 +269,7 @@ export function registerSocketHandlers(io: TranslationServer) {
 
           if (transcript.isFinal) {
             sessionStore.addTranscript(sessionId, segment);
+            translateFinalSegment(io, sessionId, segment);
           }
 
           emitSegment(io, sessionId, segment);

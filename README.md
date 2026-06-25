@@ -1,17 +1,18 @@
 # Live Transcription Studio
 
-Browser microphone capture, Deepgram real-time transcription, multi-screen live viewing, transcript history, session dashboard, and TXT/SRT export.
+Browser microphone capture, Deepgram real-time transcription, OpenAI translation, multi-screen live viewing, transcript history, and TXT/SRT export.
 
-OpenAI translation is intentionally disabled in the current build. Session creation and microphone recording require only a valid Deepgram API key.
+Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
 
 ## Features
 
 - Browser microphone capture with `MediaRecorder`
 - Live audio streaming over Socket.io
 - Deepgram streaming speech-to-text with interim and final transcripts
+- OpenAI `gpt-4o-mini` translation for final transcript segments
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
-- Viewers receive transcript subtitles instantly over Socket.io rooms
+- Viewers receive original and translated subtitles over Socket.io rooms
 - Shareable session links using `?session=<code>`
 - Transcript history for final segments in the current room
 - Export transcript history to `.txt`
@@ -29,7 +30,9 @@ flowchart LR
   Browser["Browser<br/>MediaRecorder"] -->|"audio chunks<br/>Socket.io"| Server["Custom Node Server<br/>Next.js + Socket.io"]
   Server -->|"stream audio"| Deepgram["Deepgram<br/>Streaming API"]
   Deepgram -->|"interim/final transcripts"| Server
-  Server -->|"live transcript subtitles"| Broadcaster["Broadcaster Screen"]
+  Server -->|"final transcript"| OpenAI["OpenAI<br/>gpt-4o-mini"]
+  OpenAI -->|"translation"| Server
+  Server -->|"original + translated subtitles"| Broadcaster["Broadcaster Screen"]
   Server -->|"room broadcast"| Viewers["Viewer Screens"]
   UI["Next.js App Router UI"] -->|"REST"| API["/api/health<br/>/api/sessions"]
   API --> Sessions["In-memory Session Store"]
@@ -45,7 +48,7 @@ Copy `.env.example` to `.env.local`:
 
 ```bash
 DEEPGRAM_API_KEY=your_deepgram_api_key
-OPENAI_API_KEY=
+OPENAI_API_KEY=your_openai_api_key
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 PORT=3000
 DEEPGRAM_MODEL=nova-3
@@ -57,13 +60,13 @@ OPENAI_TRANSLATION_MAX_TOKENS=70
 Environment variable reference:
 
 - `DEEPGRAM_API_KEY`: Required. Server-side Deepgram API key used for streaming transcription.
-- `OPENAI_API_KEY`: Optional in the current build because OpenAI translation is disabled. Keep unset unless translation is re-enabled.
+- `OPENAI_API_KEY`: Optional but recommended. Enables OpenAI translation. If missing, Deepgram transcription still works and the UI shows `OpenAI translation is not configured`.
 - `NEXT_PUBLIC_APP_URL`: Required in production. Set to the public Railway or Render URL with protocol, for example `https://your-app.up.railway.app` or `https://your-app.onrender.com`. `your-app.up.railway.app` without `https://` is invalid. Comma-separated origins are supported if you need multiple allowed Socket.io origins.
 - `PORT`: Local development port. Railway and Render inject this automatically in production.
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
-- `OPENAI_TRANSLATION_TIMEOUT_MS`: Ignored while translation is disabled. Keep default `1800` for future translation work.
-- `OPENAI_TRANSLATION_MAX_TOKENS`: Ignored while translation is disabled. Keep default `70` for future translation work.
+- `OPENAI_TRANSLATION_TIMEOUT_MS`: OpenAI request timeout in milliseconds. Default: `1800`.
+- `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
 
 Do not commit real API keys. `.env`, `.env.local`, and `.env*.local` are ignored by git.
 
@@ -96,7 +99,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
 3. Set the service type to a Node.js app.
 4. Add environment variables:
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
-   - `OPENAI_API_KEY=` optional, leave empty while translation is disabled
+   - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.up.railway.app`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
@@ -115,7 +118,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
 3. Select the Node runtime.
 4. Add environment variables:
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
-   - `OPENAI_API_KEY=` optional, leave empty while translation is disabled
+   - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.onrender.com`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
@@ -149,7 +152,7 @@ Netlify is not recommended for this version because the app depends on a persist
 4. Share the generated session code or copied link with viewers.
 5. Click **Start microphone**.
 6. Approve browser microphone access.
-7. Speak and watch Deepgram transcripts update live.
+7. Speak and watch Deepgram transcripts and OpenAI translations update live.
 8. Use **Export TXT** or **Export SRT** to download the current history.
 9. Click **Stop recording** when finished.
 
@@ -189,10 +192,12 @@ Returns session metadata and recent final transcript segments.
 ## Low-Latency Transcription
 
 - Browser audio is sent in 75 ms chunks.
-- Socket.io is locked to WebSocket transport with per-message compression disabled.
+- Socket.io uses WebSocket with polling fallback and per-message compression disabled.
 - Deepgram model and endpointing are configurable; defaults are `DEEPGRAM_MODEL=nova-3` and `DEEPGRAM_ENDPOINTING_MS=60`.
 - Interim Deepgram transcripts are displayed immediately.
 - Final transcripts are stored in session history and replayed to new viewers.
+- Final transcripts are translated with OpenAI when `OPENAI_API_KEY` is configured.
+- OpenAI errors do not stop the session or microphone stream.
 
 The sub-second target depends on microphone/browser scheduling, network distance to Deepgram, language/model availability, and hosting location.
 

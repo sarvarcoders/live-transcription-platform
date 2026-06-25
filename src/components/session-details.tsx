@@ -28,7 +28,8 @@ export function SessionDetails({ session, copy }: { session: SessionSummary; cop
       </div>
       <div className="mt-3 grid gap-1.5 text-xs text-slate-600 dark:text-slate-300">
         <div>
-          <span className="font-medium text-slate-900 dark:text-white">{copy.language}:</span> {getLanguageLabel(session.sourceLanguage)}
+          <span className="font-medium text-slate-900 dark:text-white">{copy.language}:</span>{" "}
+          {getLanguageLabel(session.sourceLanguage)} → {getLanguageLabel(session.targetLanguage)}
         </div>
         <div><span className="font-medium text-slate-900 dark:text-white">{copy.status}:</span> {session.status}</div>
         <div><span className="font-medium text-slate-900 dark:text-white">{copy.expires}:</span> {new Date(session.expiresAt).toLocaleTimeString()}</div>

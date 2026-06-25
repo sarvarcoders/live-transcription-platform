@@ -14,6 +14,7 @@ export type BroadcasterStatus = "idle" | "creating" | "ready" | "recording" | "s
 interface HostControlsProps {
   title: string;
   sourceLanguage: LanguageCode;
+  targetLanguage: LanguageCode;
   session: SessionSummary | null;
   isCreating: boolean;
   isRecording: boolean;
@@ -24,6 +25,7 @@ interface HostControlsProps {
   copy: UiCopy;
   onTitleChange: (title: string) => void;
   onSourceLanguageChange: (language: LanguageCode) => void;
+  onTargetLanguageChange: (language: LanguageCode) => void;
   onCreateSession: () => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
@@ -33,6 +35,7 @@ interface HostControlsProps {
 export function HostControls({
   title,
   sourceLanguage,
+  targetLanguage,
   session,
   isCreating,
   isRecording,
@@ -43,6 +46,7 @@ export function HostControls({
   copy,
   onTitleChange,
   onSourceLanguageChange,
+  onTargetLanguageChange,
   onCreateSession,
   onStartRecording,
   onStopRecording,
@@ -97,6 +101,14 @@ export function HostControls({
         value={sourceLanguage}
         disabled={hasSession}
         onChange={onSourceLanguageChange}
+      />
+
+      <LanguageSelect
+        id="target-language"
+        label={copy.targetLanguage}
+        value={targetLanguage}
+        disabled={hasSession}
+        onChange={onTargetLanguageChange}
       />
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}

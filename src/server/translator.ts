@@ -9,11 +9,39 @@ const pendingTranslations = new Map<string, Promise<string>>();
 const pendingStreamingTranslations = new Map<string, Promise<string>>();
 let openaiClient: OpenAI | null = null;
 
+export class TranslationError extends Error {
+  code: "OPENAI_NOT_CONFIGURED" | "OPENAI_AUTH_INVALID" | "OPENAI_QUOTA_EXCEEDED" | "OPENAI_TRANSLATION_FAILED";
+
+  constructor(code: TranslationError["code"], message: string) {
+    super(message);
+    this.name = "TranslationError";
+    this.code = code;
+  }
+}
+
+export function classifyTranslationError(error: unknown) {
+  if (error instanceof TranslationError) return error;
+
+  const maybeStatus = typeof error === "object" && error !== null && "status" in error
+    ? Number((error as { status?: number }).status)
+    : undefined;
+
+  if (maybeStatus === 401) {
+    return new TranslationError("OPENAI_AUTH_INVALID", "OpenAI API key is invalid");
+  }
+
+  if (maybeStatus === 429) {
+    return new TranslationError("OPENAI_QUOTA_EXCEEDED", "OpenAI quota exceeded or billing is not active");
+  }
+
+  return new TranslationError("OPENAI_TRANSLATION_FAILED", "OpenAI translation failed");
+}
+
 function getClient() {
   if (!openaiClient) {
     const env = getServerEnv();
     if (!env.OPENAI_API_KEY) {
-      throw new Error("OpenAI translation is disabled.");
+      throw new TranslationError("OPENAI_NOT_CONFIGURED", "OpenAI translation is not configured");
     }
     openaiClient = new OpenAI({
       apiKey: env.OPENAI_API_KEY,

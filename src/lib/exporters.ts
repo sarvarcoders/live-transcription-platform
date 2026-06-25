@@ -33,10 +33,11 @@ function downloadTextFile(filename: string, content: string) {
 export function exportTranscriptTxt(session: SessionSummary | null, segments: TranscriptSegment[]) {
   const title = session?.title ?? "Live Transcription Session";
   const source = session ? getLanguageLabel(session.sourceLanguage) : "Transcript";
+  const target = session ? getLanguageLabel(session.targetLanguage) : "Translation";
   const header = [
     title,
     session ? `Session: ${session.id}` : null,
-    `Language: ${source}`,
+    `Route: ${source} -> ${target}`,
     `Exported: ${new Date().toISOString()}`
   ]
     .filter(Boolean)
@@ -45,7 +46,8 @@ export function exportTranscriptTxt(session: SessionSummary | null, segments: Tr
   const body = segments
     .filter((segment) => segment.isFinal)
     .map((segment, index) => {
-      return `${index + 1}. [${new Date(segment.startedAt).toLocaleTimeString()}]\n${segment.text}`;
+      const translation = segment.translatedText ? `\n${target}: ${segment.translatedText}` : "";
+      return `${index + 1}. [${new Date(segment.startedAt).toLocaleTimeString()}]\n${source}: ${segment.text}${translation}`;
     })
     .join("\n\n");
 
@@ -63,7 +65,8 @@ export function exportTranscriptSrt(session: SessionSummary | null, segments: Tr
         ? new Date(finalSegments[index + 1].startedAt).getTime() - baseTime
         : start + 3000;
       const end = Math.max(start + 1200, nextStart - 150);
-      return `${index + 1}\n${srtTimestamp(start)} --> ${srtTimestamp(end)}\n${segment.text}`;
+      const translation = segment.translatedText ? `\n${segment.translatedText}` : "";
+      return `${index + 1}\n${srtTimestamp(start)} --> ${srtTimestamp(end)}\n${segment.text}${translation}`;
     })
     .join("\n\n");
 
