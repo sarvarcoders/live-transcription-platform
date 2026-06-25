@@ -11,6 +11,7 @@ import { type BroadcasterStatus, HostControls } from "./host-controls";
 import { PreferenceControls } from "./preference-controls";
 import { SubtitlePanel } from "./subtitle-panel";
 import { TranscriptHistory } from "./transcript-history";
+import { VoiceControls } from "./voice-controls";
 import { ViewerControls } from "./viewer-controls";
 
 type Mode = "broadcaster" | "viewer";
@@ -308,6 +309,17 @@ export function TranscriptionStudio() {
         </div>
 
         <aside className="order-3 grid content-start gap-3 lg:sticky lg:top-3">
+          <VoiceControls
+            isAvailable={live.isVoiceAvailable}
+            isConfigured={live.isVoiceConfigured}
+            isEnabled={live.isVoiceEnabled}
+            isPlaying={live.isVoicePlaying}
+            queueLength={live.voiceQueueLength}
+            error={live.voiceError}
+            copy={copy}
+            onToggle={live.setVoiceEnabled}
+            onStop={live.stopVoice}
+          />
           <ExportControls session={live.session} segments={live.segments} copy={copy} />
           <TranscriptHistory segments={live.segments} copy={copy} />
         </aside>

@@ -32,6 +32,11 @@ const TRANSLATION_ERROR_CODES = new Set([
   "OPENAI_TRANSLATION_FAILED"
 ]);
 
+type VoiceQueueItem = {
+  key: string;
+  text: string;
+};
+
 function getRecorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
@@ -82,12 +87,146 @@ export function useLiveTranscription() {
   const [isRecording, setIsRecording] = useState(false);
   const [role, setRole] = useState<LiveRole | null>(null);
   const [hasBroadcasterToken, setHasBroadcasterToken] = useState(false);
+  const [isVoiceAvailable, setIsVoiceAvailable] = useState(false);
+  const [isVoiceConfigured, setIsVoiceConfigured] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
+  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [voiceQueueLength, setVoiceQueueLength] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const latestAcceptedTranslationStartedAtRef = useRef(0);
   const latestSeenTranscriptStartedAtRef = useRef(0);
   const lastDisplayedTranslationRef = useRef<string | null>(null);
   const lastDisplayUpdateAtRef = useRef(0);
   const displayHoldTimerRef = useRef<number | null>(null);
   const queuedDisplayRef = useRef<TranscriptSegment | null>(null);
+  const voiceQueueRef = useRef<VoiceQueueItem[]>([]);
+  const voiceCacheRef = useRef<Map<string, string>>(new Map());
+  const spokenVoiceKeysRef = useRef<Set<string>>(new Set());
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAudioStopRef = useRef<(() => void) | null>(null);
+  const isVoiceProcessingRef = useRef(false);
+
+  const updateVoiceQueueLength = useCallback(() => {
+    setVoiceQueueLength(voiceQueueRef.current.length);
+  }, []);
+
+  const stopVoice = useCallback(() => {
+    voiceQueueRef.current = [];
+    updateVoiceQueueLength();
+    currentAudioStopRef.current?.();
+    currentAudioRef.current?.pause();
+    currentAudioRef.current = null;
+    currentAudioStopRef.current = null;
+    isVoiceProcessingRef.current = false;
+    setIsVoicePlaying(false);
+  }, [updateVoiceQueueLength]);
+
+  const playAudioUrl = useCallback((url: string) => {
+    return new Promise<void>((resolve, reject) => {
+      const audio = new Audio(url);
+      const cleanup = () => {
+        audio.onended = null;
+        audio.onerror = null;
+        currentAudioStopRef.current = null;
+      };
+      currentAudioRef.current = audio;
+      currentAudioStopRef.current = () => {
+        cleanup();
+        resolve();
+      };
+      audio.onended = () => {
+        cleanup();
+        resolve();
+      };
+      audio.onerror = () => {
+        cleanup();
+        reject(new Error("Could not play translated voice audio."));
+      };
+      audio.play().catch(reject);
+    }).finally(() => {
+      currentAudioRef.current = null;
+      currentAudioStopRef.current = null;
+    });
+  }, []);
+
+  const processVoiceQueue = useCallback(async () => {
+    if (isVoiceProcessingRef.current) return;
+    isVoiceProcessingRef.current = true;
+
+    try {
+      while (voiceQueueRef.current.length > 0) {
+        const nextItem = voiceQueueRef.current.shift();
+        updateVoiceQueueLength();
+        if (!nextItem) continue;
+
+        setIsVoicePlaying(true);
+        let audioUrl = voiceCacheRef.current.get(nextItem.key);
+
+        if (!audioUrl) {
+          const response = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: nextItem.text })
+          });
+
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+            throw new Error(payload?.error ?? "OpenAI voice playback failed");
+          }
+
+          const audioBlob = await response.blob();
+          audioUrl = URL.createObjectURL(audioBlob);
+          voiceCacheRef.current.set(nextItem.key, audioUrl);
+        }
+
+        await playAudioUrl(audioUrl);
+      }
+    } catch (voicePlaybackError) {
+      setVoiceError(voicePlaybackError instanceof Error ? voicePlaybackError.message : "OpenAI voice playback failed");
+    } finally {
+      isVoiceProcessingRef.current = false;
+      setIsVoicePlaying(false);
+      updateVoiceQueueLength();
+    }
+  }, [playAudioUrl, updateVoiceQueueLength]);
+
+  const enqueueVoicePlayback = useCallback(
+    (segment: TranscriptSegment) => {
+      if (!isVoiceEnabled || !segment.translatedText) return;
+      if (!segment.isFinal && !segment.metrics?.translationCompletedAt) return;
+
+      const normalizedText = segment.translatedText.trim().replace(/\s+/g, " ");
+      if (!normalizedText) return;
+
+      const key = normalizedText.toLocaleLowerCase();
+      if (spokenVoiceKeysRef.current.has(key)) return;
+
+      spokenVoiceKeysRef.current.add(key);
+      voiceQueueRef.current.push({ key, text: normalizedText });
+      updateVoiceQueueLength();
+      void processVoiceQueue();
+    },
+    [isVoiceEnabled, processVoiceQueue, updateVoiceQueueLength]
+  );
+
+  const setVoiceEnabled = useCallback(
+    (enabled: boolean) => {
+      setVoiceError(null);
+      if (!enabled) {
+        setIsVoiceEnabled(false);
+        stopVoice();
+        return;
+      }
+
+      if (!isVoiceAvailable) {
+        setVoiceError(isVoiceConfigured ? "Voice playback is disabled on this server" : "OpenAI voice playback is not configured");
+        return;
+      }
+
+      setIsVoiceEnabled(true);
+    },
+    [isVoiceAvailable, isVoiceConfigured, stopVoice]
+  );
 
   const clearDisplayHoldTimer = useCallback(() => {
     if (displayHoldTimerRef.current) {
@@ -287,6 +426,7 @@ export function useLiveTranscription() {
         if (isLatestTranscriptUpdate && translationStartedAt >= latestAcceptedTranslationStartedAtRef.current) {
           latestAcceptedTranslationStartedAtRef.current = translationStartedAt;
           queueDisplayedTranslation(measuredSegment);
+          enqueueVoicePlayback(measuredSegment);
         }
       } else if (isLatestTranscriptUpdate && (measuredSegment.translationStatus === "pending" || !measuredSegment.isFinal)) {
         setPendingTranslation(measuredSegment);
@@ -343,7 +483,7 @@ export function useLiveTranscription() {
 
     socketRef.current = socket;
     return socket;
-  }, [clearLocalSessionState, queueDisplayedTranslation, stopLocalRecording]);
+  }, [clearLocalSessionState, enqueueVoicePlayback, queueDisplayedTranslation, stopLocalRecording]);
 
   const waitForConnectedSocket = useCallback(async () => {
     const socket = connect();
@@ -566,6 +706,28 @@ export function useLiveTranscription() {
   }, [connect]);
 
   useEffect(() => {
+    let isMounted = true;
+    fetch("/api/tts")
+      .then((response) => response.json())
+      .then((payload: { enabled?: boolean; configured?: boolean }) => {
+        if (!isMounted) return;
+        setIsVoiceConfigured(Boolean(payload.configured));
+        setIsVoiceAvailable(Boolean(payload.enabled && payload.configured));
+      })
+      .catch(() => {
+        if (isMounted) {
+          setIsVoiceConfigured(false);
+          setIsVoiceAvailable(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const voiceCache = voiceCacheRef.current;
     return () => {
       if (recorderRef.current?.state !== "inactive") {
         recorderRef.current?.stop();
@@ -573,8 +735,13 @@ export function useLiveTranscription() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       socketRef.current?.disconnect();
       clearDisplayHoldTimer();
+      stopVoice();
+      for (const audioUrl of voiceCache.values()) {
+        URL.revokeObjectURL(audioUrl);
+      }
+      voiceCache.clear();
     };
-  }, [clearDisplayHoldTimer]);
+  }, [clearDisplayHoldTimer, stopVoice]);
 
   return useMemo(
     () => ({
@@ -594,6 +761,14 @@ export function useLiveTranscription() {
       isRecording,
       role,
       hasBroadcasterToken,
+      isVoiceAvailable,
+      isVoiceConfigured,
+      isVoiceEnabled,
+      isVoicePlaying,
+      voiceQueueLength,
+      voiceError,
+      setVoiceEnabled,
+      stopVoice,
       hostSession,
       joinSession,
       startRecording,
@@ -618,6 +793,14 @@ export function useLiveTranscription() {
       isRecording,
       role,
       hasBroadcasterToken,
+      isVoiceAvailable,
+      isVoiceConfigured,
+      isVoiceEnabled,
+      isVoicePlaying,
+      voiceQueueLength,
+      voiceError,
+      setVoiceEnabled,
+      stopVoice,
       hostSession,
       joinSession,
       startRecording,

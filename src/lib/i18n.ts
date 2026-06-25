@@ -90,7 +90,15 @@ export const uiCopy = {
     noSessions: "No sessions yet.",
     updated: "Updated",
     focusMode: "Focus mode",
-    exitFocus: "Exit focus"
+    exitFocus: "Exit focus",
+    voicePlayback: "Voice playback",
+    enableVoice: "Enable translated voice",
+    disableVoice: "Disable translated voice",
+    stopVoice: "Stop voice",
+    voiceUnavailable: "OpenAI voice playback is not configured",
+    voiceDisabled: "Voice playback is disabled on this server",
+    voicePlaying: "Playing translated audio",
+    voiceQueued: "Queued clips"
   },
   uz: {
     appEyebrow: "Deepgram transkripsiya paneli",
@@ -180,7 +188,15 @@ export const uiCopy = {
     noSessions: "Hali session yo‘q.",
     updated: "Yangilandi",
     focusMode: "Focus rejim",
-    exitFocus: "Focusdan chiqish"
+    exitFocus: "Focusdan chiqish",
+    voicePlayback: "Ovozli tarjima",
+    enableVoice: "Ovozli tarjimani yoqish",
+    disableVoice: "Ovozli tarjimani o'chirish",
+    stopVoice: "Ovozni to'xtatish",
+    voiceUnavailable: "OpenAI ovozli ijro sozlanmagan",
+    voiceDisabled: "Ovozli tarjima serverda o'chirilgan",
+    voicePlaying: "Tarjima audiosi o'qilmoqda",
+    voiceQueued: "Navbatdagi audiolar"
   }
 } as const;
 

@@ -28,7 +28,11 @@ const envSchema = z.object({
   SUBTITLE_MAX_CHARS: z.coerce.number().int().min(40).max(300).default(120),
   FINAL_TRANSLATION_DEBOUNCE_MS: z.coerce.number().int().min(0).max(5000).default(120),
   OPENAI_TRANSLATION_TIMEOUT_MS: z.coerce.number().int().min(500).max(10000).default(1800),
-  OPENAI_TRANSLATION_MAX_TOKENS: z.coerce.number().int().min(20).max(300).default(70)
+  OPENAI_TRANSLATION_MAX_TOKENS: z.coerce.number().int().min(20).max(300).default(70),
+  OPENAI_TTS_ENABLED: booleanFromEnv.default(false),
+  OPENAI_TTS_MODEL: z.string().min(1).default("gpt-4o-mini-tts"),
+  OPENAI_TTS_VOICE: z.string().min(1).default("coral"),
+  OPENAI_TTS_FORMAT: z.enum(["mp3", "opus", "aac", "flac", "wav", "pcm"]).default("mp3")
 });
 
 export type ServerEnv = z.infer<typeof envSchema>;
@@ -82,7 +86,12 @@ export function getEnvDiagnostics() {
     finalTranslationDebounceMs: process.env.FINAL_TRANSLATION_DEBOUNCE_MS ?? 120,
     openaiTranslationEnabled: openai.present,
     openaiTimeoutMs: process.env.OPENAI_TRANSLATION_TIMEOUT_MS ?? 1800,
-    openaiMaxTokens: process.env.OPENAI_TRANSLATION_MAX_TOKENS ?? 70
+    openaiMaxTokens: process.env.OPENAI_TRANSLATION_MAX_TOKENS ?? 70,
+    openaiTtsEnabled: process.env.OPENAI_TTS_ENABLED ?? false,
+    openaiTtsConfigured: openai.present,
+    openaiTtsModel: process.env.OPENAI_TTS_MODEL ?? "gpt-4o-mini-tts",
+    openaiTtsVoice: process.env.OPENAI_TTS_VOICE ?? "coral",
+    openaiTtsFormat: process.env.OPENAI_TTS_FORMAT ?? "mp3"
   };
 }
 
@@ -105,7 +114,12 @@ export function logEnvDiagnostics(context: string) {
     subtitleMaxChars: diagnostics.subtitleMaxChars,
     finalTranslationDebounceMs: diagnostics.finalTranslationDebounceMs,
     openaiTimeoutMs: diagnostics.openaiTimeoutMs,
-    openaiMaxTokens: diagnostics.openaiMaxTokens
+    openaiMaxTokens: diagnostics.openaiMaxTokens,
+    openaiTtsEnabled: diagnostics.openaiTtsEnabled,
+    openaiTtsConfigured: diagnostics.openaiTtsConfigured,
+    openaiTtsModel: diagnostics.openaiTtsModel,
+    openaiTtsVoice: diagnostics.openaiTtsVoice,
+    openaiTtsFormat: diagnostics.openaiTtsFormat
   });
   return diagnostics;
 }
@@ -130,7 +144,11 @@ export function getServerEnv(): ServerEnv {
     SUBTITLE_MAX_CHARS: process.env.SUBTITLE_MAX_CHARS ?? 120,
     FINAL_TRANSLATION_DEBOUNCE_MS: process.env.FINAL_TRANSLATION_DEBOUNCE_MS ?? 120,
     OPENAI_TRANSLATION_TIMEOUT_MS: process.env.OPENAI_TRANSLATION_TIMEOUT_MS ?? 1800,
-    OPENAI_TRANSLATION_MAX_TOKENS: process.env.OPENAI_TRANSLATION_MAX_TOKENS ?? 70
+    OPENAI_TRANSLATION_MAX_TOKENS: process.env.OPENAI_TRANSLATION_MAX_TOKENS ?? 70,
+    OPENAI_TTS_ENABLED: process.env.OPENAI_TTS_ENABLED ?? false,
+    OPENAI_TTS_MODEL: process.env.OPENAI_TTS_MODEL ?? "gpt-4o-mini-tts",
+    OPENAI_TTS_VOICE: process.env.OPENAI_TTS_VOICE ?? "coral",
+    OPENAI_TTS_FORMAT: process.env.OPENAI_TTS_FORMAT ?? "mp3"
   });
 
   if (!parsed.success) {

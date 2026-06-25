@@ -10,6 +10,7 @@ Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates interim and fina
 - Live audio streaming over Socket.io
 - Deepgram streaming speech-to-text with interim and final transcripts
 - OpenAI `gpt-4o-mini` translation for interim and final transcript segments
+- Optional OpenAI Text-to-Speech playback for translated Uzbek subtitles
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
 - Viewers receive original and translated subtitles over Socket.io rooms
@@ -62,6 +63,10 @@ SUBTITLE_MAX_CHARS=120
 FINAL_TRANSLATION_DEBOUNCE_MS=120
 OPENAI_TRANSLATION_TIMEOUT_MS=1800
 OPENAI_TRANSLATION_MAX_TOKENS=70
+OPENAI_TTS_ENABLED=false
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_VOICE=coral
+OPENAI_TTS_FORMAT=mp3
 ```
 
 Environment variable reference:
@@ -81,6 +86,10 @@ Environment variable reference:
 - `FINAL_TRANSLATION_DEBOUNCE_MS`: Short debounce before final transcript translation. Default: `120`.
 - `OPENAI_TRANSLATION_TIMEOUT_MS`: OpenAI request timeout in milliseconds. Default: `1800`.
 - `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
+- `OPENAI_TTS_ENABLED`: Enables optional translated voice playback. Default: `false`.
+- `OPENAI_TTS_MODEL`: OpenAI Text-to-Speech model. Default: `gpt-4o-mini-tts`.
+- `OPENAI_TTS_VOICE`: TTS voice for translated Uzbek playback. Default: `coral`.
+- `OPENAI_TTS_FORMAT`: TTS audio format. Default: `mp3`.
 
 Do not commit real API keys. `.env`, `.env.local`, and `.env*.local` are ignored by git.
 
@@ -126,6 +135,10 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
+   - `OPENAI_TTS_ENABLED=false`
+   - `OPENAI_TTS_MODEL=gpt-4o-mini-tts`
+   - `OPENAI_TTS_VOICE=coral`
+   - `OPENAI_TTS_FORMAT=mp3`
 5. Use these Railway settings:
    - Build command: `npm run build`
    - Start command: `npm run start`
@@ -152,6 +165,10 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
+   - `OPENAI_TTS_ENABLED=false`
+   - `OPENAI_TTS_MODEL=gpt-4o-mini-tts`
+   - `OPENAI_TTS_VOICE=coral`
+   - `OPENAI_TTS_FORMAT=mp3`
 5. Use these Render settings:
    - Build command: `npm install && npm run build`
    - Start command: `npm run start`
@@ -242,6 +259,18 @@ The live dashboard tracks rolling averages, latest samples, and p95 values for:
 - Deepgram latency: server audio receipt to transcript event.
 - WebSocket delivery latency: server subtitle emit to client receipt.
 - Total end-to-end latency: estimated capture time to client subtitle receipt.
+
+## Optional Voice Playback
+
+Translated voice playback is disabled by default to keep OpenAI costs predictable. Set `OPENAI_TTS_ENABLED=true` to expose the voice controls in the UI.
+
+- The browser never receives `OPENAI_API_KEY`; it calls `/api/tts` and receives an audio file.
+- TTS is generated only from translated Uzbek text, never from the original source transcript.
+- The client queues audio clips and plays them one by one so clips do not overlap.
+- Duplicate repeated translations are skipped by each viewer.
+- The server caches generated TTS audio by translated text, model, voice, and format during the running process.
+- The **Stop voice** button clears the local audio queue and stops the current clip.
+- If TTS is disabled or OpenAI is missing, subtitles continue working normally.
 
 ## Multi-Screen Support
 
