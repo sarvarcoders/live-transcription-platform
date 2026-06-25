@@ -184,6 +184,10 @@ export function TranscriptionStudio() {
         <SubtitlePanel
           segments={live.segments}
           interimSegment={live.interimSegment}
+          lastDisplayedTranslation={live.lastDisplayedTranslation}
+          pendingTranslation={live.pendingTranslation}
+          isTranslationPending={live.isTranslationPending}
+          lastFinalTranslation={live.lastFinalTranslation}
           isRecording={live.isRecording}
           connectionState={live.connectionState}
           session={live.session}
@@ -291,6 +295,10 @@ export function TranscriptionStudio() {
           <SubtitlePanel
             segments={live.segments}
             interimSegment={live.interimSegment}
+            lastDisplayedTranslation={live.lastDisplayedTranslation}
+            pendingTranslation={live.pendingTranslation}
+            isTranslationPending={live.isTranslationPending}
+            lastFinalTranslation={live.lastFinalTranslation}
             isRecording={live.isRecording}
             connectionState={live.connectionState}
             session={live.session}

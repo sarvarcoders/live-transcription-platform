@@ -70,11 +70,26 @@ export function useLiveTranscription() {
   const [session, setSession] = useState<SessionSummary | null>(null);
   const [segments, setSegments] = useState<TranscriptSegment[]>([]);
   const [interimSegment, setInterimSegment] = useState<TranscriptSegment | null>(null);
+  const [lastDisplayedTranslation, setLastDisplayedTranslation] = useState<string | null>(null);
+  const [pendingTranslation, setPendingTranslation] = useState<TranscriptSegment | null>(null);
+  const [isTranslationPending, setIsTranslationPending] = useState(false);
+  const [lastFinalTranslation, setLastFinalTranslation] = useState<string | null>(null);
   const [latencySamples, setLatencySamples] = useState<LatencyMetrics[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [role, setRole] = useState<LiveRole | null>(null);
   const [hasBroadcasterToken, setHasBroadcasterToken] = useState(false);
+  const latestAcceptedTranslationStartedAtRef = useRef(0);
+  const latestSeenTranscriptStartedAtRef = useRef(0);
+
+  const resetTranslationDisplay = useCallback(() => {
+    latestAcceptedTranslationStartedAtRef.current = 0;
+    latestSeenTranscriptStartedAtRef.current = 0;
+    setLastDisplayedTranslation(null);
+    setPendingTranslation(null);
+    setIsTranslationPending(false);
+    setLastFinalTranslation(null);
+  }, []);
 
   const stopLocalRecording = useCallback(() => {
     if (recorderRef.current?.state !== "inactive") {
@@ -93,12 +108,13 @@ export function useLiveTranscription() {
     setSession(null);
     setSegments([]);
     setInterimSegment(null);
+    resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
     setHasBroadcasterToken(false);
     setIsRecording(false);
     if (message) setError(message);
-  }, [stopLocalRecording]);
+  }, [resetTranslationDisplay, stopLocalRecording]);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return socketRef.current;
@@ -187,8 +203,32 @@ export function useLiveTranscription() {
         totalLatencyMs: segment.metrics?.capturedAt ? clientReceivedAt - segment.metrics.capturedAt : undefined
       };
       const measuredSegment = { ...segment, metrics };
+      const translationStartedAt = metrics.translationStartedAt ?? clientReceivedAt;
+      const segmentStartedAt = Date.parse(measuredSegment.startedAt) || clientReceivedAt;
+      latestSeenTranscriptStartedAtRef.current = Math.max(latestSeenTranscriptStartedAtRef.current, segmentStartedAt);
+      const isLatestTranscriptUpdate = segmentStartedAt >= latestSeenTranscriptStartedAtRef.current;
 
       setLatencySamples((current) => [...current.slice(-119), metrics]);
+
+      if (measuredSegment.translationStatus === "error") {
+        if (isLatestTranscriptUpdate) {
+          setPendingTranslation(null);
+          setIsTranslationPending(false);
+        }
+      } else if (measuredSegment.translatedText) {
+        if (isLatestTranscriptUpdate && translationStartedAt >= latestAcceptedTranslationStartedAtRef.current) {
+          latestAcceptedTranslationStartedAtRef.current = translationStartedAt;
+          setLastDisplayedTranslation(measuredSegment.translatedText);
+          setPendingTranslation(measuredSegment.translationStatus === "pending" ? measuredSegment : null);
+          setIsTranslationPending(measuredSegment.translationStatus === "pending");
+          if (measuredSegment.isFinal && measuredSegment.translationStatus === "complete") {
+            setLastFinalTranslation(measuredSegment.translatedText);
+          }
+        }
+      } else if (isLatestTranscriptUpdate && (measuredSegment.translationStatus === "pending" || !measuredSegment.isFinal)) {
+        setPendingTranslation(measuredSegment);
+        setIsTranslationPending(true);
+      }
 
       if (!segment.isFinal) {
         setInterimSegment(measuredSegment);
@@ -292,6 +332,7 @@ export function useLiveTranscription() {
       setError(null);
       setSegments([]);
       setInterimSegment(null);
+      resetTranslationDisplay();
       setRole("broadcaster");
       credentialsRef.current = reconnectToken
         ? { sessionId, role: "broadcaster", reconnectToken }
@@ -300,7 +341,7 @@ export function useLiveTranscription() {
       const socket = connect();
       socket.emit("session:host", { sessionId, reconnectToken });
     },
-    [connect]
+    [connect, resetTranslationDisplay]
   );
 
   const joinSession = useCallback(
@@ -308,6 +349,7 @@ export function useLiveTranscription() {
       setError(null);
       setSegments([]);
       setInterimSegment(null);
+      resetTranslationDisplay();
       setRole("viewer");
       const existingCredentials = credentialsRef.current;
       const reconnectToken =
@@ -317,7 +359,7 @@ export function useLiveTranscription() {
       const socket = connect();
       socket.emit("session:join", { sessionId, reconnectToken });
     },
-    [connect]
+    [connect, resetTranslationDisplay]
   );
 
   const startRecording = useCallback(async () => {
@@ -436,13 +478,14 @@ export function useLiveTranscription() {
     setSession(null);
     setSegments([]);
     setInterimSegment(null);
+    resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
     setHasBroadcasterToken(false);
     credentialsRef.current = null;
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setConnectionState("idle");
-  }, [session, stopRecording]);
+  }, [resetTranslationDisplay, session, stopRecording]);
 
   useEffect(() => {
     const storedCredentials = window.localStorage.getItem(SESSION_STORAGE_KEY);
@@ -476,6 +519,10 @@ export function useLiveTranscription() {
       session,
       segments,
       interimSegment,
+      lastDisplayedTranslation,
+      pendingTranslation,
+      isTranslationPending,
+      lastFinalTranslation,
       latencySamples,
       error,
       isRecording,
@@ -494,6 +541,10 @@ export function useLiveTranscription() {
       session,
       segments,
       interimSegment,
+      lastDisplayedTranslation,
+      pendingTranslation,
+      isTranslationPending,
+      lastFinalTranslation,
       latencySamples,
       error,
       isRecording,

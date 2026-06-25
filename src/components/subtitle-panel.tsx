@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils";
 interface SubtitlePanelProps {
   segments: TranscriptSegment[];
   interimSegment?: TranscriptSegment | null;
+  lastDisplayedTranslation?: string | null;
+  pendingTranslation?: TranscriptSegment | null;
+  isTranslationPending?: boolean;
+  lastFinalTranslation?: string | null;
   isRecording: boolean;
   connectionState: ConnectionState;
   session: SessionSummary | null;
@@ -21,6 +25,10 @@ interface SubtitlePanelProps {
 export function SubtitlePanel({
   segments,
   interimSegment,
+  lastDisplayedTranslation,
+  pendingTranslation,
+  isTranslationPending,
+  lastFinalTranslation,
   isRecording,
   connectionState,
   session,
@@ -28,10 +36,12 @@ export function SubtitlePanel({
   isFocusMode,
   onToggleFocus
 }: SubtitlePanelProps) {
-  const liveSegment = interimSegment ?? segments.at(-1) ?? null;
+  const liveSegment = pendingTranslation ?? interimSegment ?? segments.at(-1) ?? null;
   const recentSegments = segments.slice(-3);
   const isConnected = connectionState === "connected";
   const translationPending = "Tarjima qilinmoqda\u2026";
+  const displayTranslation = lastDisplayedTranslation ?? lastFinalTranslation ?? null;
+  const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
 
   return (
     <section
@@ -102,20 +112,21 @@ export function SubtitlePanel({
                 </span>
               )}
             </div>
-            {liveSegment.translatedText ? (
+            {displayTranslation ? (
               <p
                 className={cn(
                   "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
                   liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
                 )}
               >
-                {liveSegment.translatedText}
+                {displayTranslation}
               </p>
-            ) : (
+            ) : null}
+            {showPendingIndicator ? (
               <p className="mx-auto rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">
                 {translationPending}
               </p>
-            )}
+            ) : null}
           </div>
         ) : (
           <div className="relative grid gap-3 text-center">
