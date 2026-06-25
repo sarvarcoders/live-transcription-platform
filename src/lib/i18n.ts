@@ -97,7 +97,8 @@ export const uiCopy = {
     stopVoice: "Stop voice",
     voiceUnavailable: "OpenAI voice playback is not configured",
     voiceDisabled: "Voice playback is disabled on this server",
-    voicePlaying: "Playing translated audio",
+    voicePreparing: "Preparing voice...",
+    voicePlaying: "Reading translated audio...",
     voiceQueued: "Queued clips"
   },
   uz: {
@@ -195,7 +196,8 @@ export const uiCopy = {
     stopVoice: "Ovozni to'xtatish",
     voiceUnavailable: "OpenAI ovozli ijro sozlanmagan",
     voiceDisabled: "Ovozli tarjima serverda o'chirilgan",
-    voicePlaying: "Tarjima audiosi o'qilmoqda",
+    voicePreparing: "Ovoz tayyorlanmoqda...",
+    voicePlaying: "Ovoz o'qilmoqda...",
     voiceQueued: "Navbatdagi audiolar"
   }
 } as const;

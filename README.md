@@ -265,8 +265,11 @@ The live dashboard tracks rolling averages, latest samples, and p95 values for:
 Translated voice playback is disabled by default to keep OpenAI costs predictable. Set `OPENAI_TTS_ENABLED=true` to expose the voice controls in the UI.
 
 - The browser never receives `OPENAI_API_KEY`; it calls `/api/tts` and receives an audio file.
+- The browser plays `/api/tts?text=...` as streaming media so audio can start before the full MP3 is downloaded.
 - TTS is generated only from translated Uzbek text, never from the original source transcript.
+- Long translated subtitles are split into smaller voice chunks before playback.
 - The client queues audio clips and plays them one by one so clips do not overlap.
+- The next voice clip can be preloaded while the current clip is playing.
 - Duplicate repeated translations are skipped by each viewer.
 - The server caches generated TTS audio by translated text, model, voice, and format during the running process.
 - The **Stop voice** button clears the local audio queue and stops the current clip.

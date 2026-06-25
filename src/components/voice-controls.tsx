@@ -9,6 +9,7 @@ interface VoiceControlsProps {
   isConfigured: boolean;
   isEnabled: boolean;
   isPlaying: boolean;
+  isPreparing: boolean;
   queueLength: number;
   error?: string | null;
   copy: UiCopy;
@@ -21,6 +22,7 @@ export function VoiceControls({
   isConfigured,
   isEnabled,
   isPlaying,
+  isPreparing,
   queueLength,
   error,
   copy,
@@ -63,6 +65,7 @@ export function VoiceControls({
 
       <div className="mt-3 grid gap-1.5 text-xs text-slate-500 dark:text-slate-400">
         {!isAvailable ? <p>{isConfigured ? copy.voiceDisabled : copy.voiceUnavailable}</p> : null}
+        {isPreparing ? <p>{copy.voicePreparing}</p> : null}
         {isPlaying ? <p>{copy.voicePlaying}</p> : null}
         {queueLength > 0 ? <p>{copy.voiceQueued}: {queueLength}</p> : null}
         {error ? <p className="text-rose-600 dark:text-rose-300">{error}</p> : null}

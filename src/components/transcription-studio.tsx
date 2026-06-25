@@ -314,6 +314,7 @@ export function TranscriptionStudio() {
             isConfigured={live.isVoiceConfigured}
             isEnabled={live.isVoiceEnabled}
             isPlaying={live.isVoicePlaying}
+            isPreparing={live.isVoicePreparing}
             queueLength={live.voiceQueueLength}
             error={live.voiceError}
             copy={copy}

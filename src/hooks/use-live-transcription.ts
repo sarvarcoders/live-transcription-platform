@@ -24,6 +24,8 @@ const AUDIO_CHUNK_MS = 75;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const SUBTITLE_MIN_DISPLAY_MS = 1000;
 const TTS_MIN_CHARS = 8;
+const TTS_TARGET_CHARS = 140;
+const TTS_MAX_CHARS = 220;
 
 const STALE_SESSION_ERROR_CODES = new Set(["SESSION_HOST_DENIED", "SESSION_NOT_FOUND"]);
 const TRANSLATION_ERROR_CODES = new Set([
@@ -36,7 +38,43 @@ const TRANSLATION_ERROR_CODES = new Set([
 type VoiceQueueItem = {
   key: string;
   text: string;
+  audio?: HTMLAudioElement;
 };
+
+function splitTranslatedTextForTts(text: string) {
+  const normalizedText = text.trim().replace(/\s+/g, " ");
+  if (normalizedText.length <= TTS_MAX_CHARS) return [normalizedText].filter(Boolean);
+
+  const chunks: string[] = [];
+  let remainingText = normalizedText;
+
+  while (remainingText.length > TTS_MAX_CHARS) {
+    const searchWindow = remainingText.slice(0, TTS_MAX_CHARS);
+    const punctuationCut = Math.max(
+      searchWindow.lastIndexOf("."),
+      searchWindow.lastIndexOf("!"),
+      searchWindow.lastIndexOf("?"),
+      searchWindow.lastIndexOf(";"),
+      searchWindow.lastIndexOf(",")
+    );
+    const targetSpaceCut = searchWindow.lastIndexOf(" ", TTS_TARGET_CHARS);
+    const maxSpaceCut = searchWindow.lastIndexOf(" ");
+    const cutIndex =
+      punctuationCut >= 80
+        ? punctuationCut + 1
+        : targetSpaceCut >= 80
+          ? targetSpaceCut
+          : maxSpaceCut >= 80
+            ? maxSpaceCut
+            : TTS_MAX_CHARS;
+
+    chunks.push(remainingText.slice(0, cutIndex).trim());
+    remainingText = remainingText.slice(cutIndex).trim();
+  }
+
+  if (remainingText) chunks.push(remainingText);
+  return chunks.filter((chunk) => chunk.length >= TTS_MIN_CHARS);
+}
 
 function getRecorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -92,6 +130,7 @@ export function useLiveTranscription() {
   const [isVoiceConfigured, setIsVoiceConfigured] = useState(false);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [isVoicePreparing, setIsVoicePreparing] = useState(false);
   const [voiceQueueLength, setVoiceQueueLength] = useState(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const latestAcceptedTranslationStartedAtRef = useRef(0);
@@ -101,7 +140,6 @@ export function useLiveTranscription() {
   const displayHoldTimerRef = useRef<number | null>(null);
   const queuedDisplayRef = useRef<TranscriptSegment | null>(null);
   const voiceQueueRef = useRef<VoiceQueueItem[]>([]);
-  const voiceCacheRef = useRef<Map<string, string>>(new Map());
   const spokenVoiceKeysRef = useRef<Set<string>>(new Set());
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioStopRef = useRef<(() => void) | null>(null);
@@ -109,6 +147,7 @@ export function useLiveTranscription() {
   const isVoiceEnabledRef = useRef(false);
   const isVoiceAvailableRef = useRef(false);
   const isVoiceConfiguredRef = useRef(false);
+  const preloadedVoiceKeysRef = useRef<Set<string>>(new Set());
 
   const updateVoiceQueueLength = useCallback(() => {
     setVoiceQueueLength(voiceQueueRef.current.length);
@@ -123,13 +162,39 @@ export function useLiveTranscription() {
     currentAudioRef.current = null;
     currentAudioStopRef.current = null;
     isVoiceProcessingRef.current = false;
+    setIsVoicePreparing(false);
     setIsVoicePlaying(false);
   }, [updateVoiceQueueLength]);
 
-  const playAudioUrl = useCallback((url: string) => {
+  const createTtsAudio = useCallback((item: VoiceQueueItem) => {
+    const audio = new Audio(`/api/tts?text=${encodeURIComponent(item.text)}`);
+    audio.preload = "auto";
+    return audio;
+  }, []);
+
+  const preloadVoiceItem = useCallback(
+    (item: VoiceQueueItem) => {
+      if (item.audio || preloadedVoiceKeysRef.current.has(item.key)) return;
+      item.audio = createTtsAudio(item);
+      preloadedVoiceKeysRef.current.add(item.key);
+      console.info("[frontend] TTS request started", {
+        textLength: item.text.length,
+        preloaded: true
+      });
+      item.audio.load();
+    },
+    [createTtsAudio]
+  );
+
+  const playVoiceItem = useCallback((item: VoiceQueueItem) => {
     return new Promise<void>((resolve, reject) => {
-      const audio = new Audio(url);
+      const audio = item.audio ?? createTtsAudio(item);
+      item.audio = audio;
+      let sawFirstAudioByte = false;
+      let sawFullAudio = false;
       const cleanup = () => {
+        audio.oncanplay = null;
+        audio.oncanplaythrough = null;
         audio.onended = null;
         audio.onerror = null;
         currentAudioStopRef.current = null;
@@ -148,7 +213,24 @@ export function useLiveTranscription() {
         console.error("[frontend] audio play error");
         reject(new Error("Could not play translated voice audio."));
       };
-      console.info("[frontend] audio play started");
+      audio.oncanplay = () => {
+        if (sawFirstAudioByte) return;
+        sawFirstAudioByte = true;
+        setIsVoicePreparing(false);
+        console.info("[frontend] first audio byte received", {
+          textLength: item.text.length
+        });
+      };
+      audio.oncanplaythrough = () => {
+        if (sawFullAudio) return;
+        sawFullAudio = true;
+        console.info("[frontend] full audio loaded", {
+          textLength: item.text.length
+        });
+      };
+      console.info("[frontend] audio playback started", {
+        textLength: item.text.length
+      });
       audio.play().catch((playError: unknown) => {
         console.error("[frontend] audio play error", {
           message: playError instanceof Error ? playError.message : String(playError)
@@ -159,7 +241,7 @@ export function useLiveTranscription() {
       currentAudioRef.current = null;
       currentAudioStopRef.current = null;
     });
-  }, []);
+  }, [createTtsAudio]);
 
   const processVoiceQueue = useCallback(async () => {
     if (isVoiceProcessingRef.current) return;
@@ -171,43 +253,30 @@ export function useLiveTranscription() {
         updateVoiceQueueLength();
         if (!nextItem) continue;
 
+        setIsVoicePreparing(true);
         setIsVoicePlaying(true);
-        let audioUrl = voiceCacheRef.current.get(nextItem.key);
-
-        if (!audioUrl) {
-          console.info("[frontend] calling /api/tts", {
-            textLength: nextItem.text.length
+        if (!nextItem.audio) {
+          console.info("[frontend] TTS request started", {
+            textLength: nextItem.text.length,
+            preloaded: false
           });
-          const response = await fetch("/api/tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: nextItem.text })
-          });
-          console.info("[frontend] /api/tts response status", {
-            status: response.status,
-            ok: response.ok
-          });
-
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(payload?.error ?? "OpenAI voice playback failed");
-          }
-
-          const audioBlob = await response.blob();
-          audioUrl = URL.createObjectURL(audioBlob);
-          voiceCacheRef.current.set(nextItem.key, audioUrl);
+          nextItem.audio = createTtsAudio(nextItem);
         }
 
-        await playAudioUrl(audioUrl);
+        const nextQueuedItem = voiceQueueRef.current[0];
+        if (nextQueuedItem) preloadVoiceItem(nextQueuedItem);
+
+        await playVoiceItem(nextItem);
       }
     } catch (voicePlaybackError) {
       setVoiceError(voicePlaybackError instanceof Error ? voicePlaybackError.message : "OpenAI voice playback failed");
     } finally {
       isVoiceProcessingRef.current = false;
+      setIsVoicePreparing(false);
       setIsVoicePlaying(false);
       updateVoiceQueueLength();
     }
-  }, [playAudioUrl, updateVoiceQueueLength]);
+  }, [createTtsAudio, playVoiceItem, preloadVoiceItem, updateVoiceQueueLength]);
 
   const enqueueVoicePlayback = useCallback(
     (segment: TranscriptSegment) => {
@@ -234,32 +303,38 @@ export function useLiveTranscription() {
         return;
       }
 
-      const normalizedText = segment.translatedText.trim().replace(/\s+/g, " ");
-      if (!normalizedText) {
+      const chunks = splitTranslatedTextForTts(segment.translatedText);
+      if (chunks.length === 0) {
         console.info("[frontend] TTS skipped: no translated text");
         return;
       }
 
-      if (normalizedText.length < TTS_MIN_CHARS) {
+      if (chunks.every((chunk) => chunk.length < TTS_MIN_CHARS)) {
         console.info("[frontend] TTS skipped: tiny translation", {
-          textLength: normalizedText.length
+          textLength: segment.translatedText.length
         });
         return;
       }
 
-      const key = normalizedText.toLocaleLowerCase();
-      if (spokenVoiceKeysRef.current.has(key)) {
-        console.info("[frontend] TTS skipped: duplicate");
-        return;
+      let queuedCount = 0;
+      for (const chunk of chunks) {
+        const key = chunk.toLocaleLowerCase();
+        if (spokenVoiceKeysRef.current.has(key)) {
+          console.info("[frontend] TTS skipped: duplicate");
+          continue;
+        }
+
+        console.info("[frontend] eligible for TTS", {
+          segmentId: segment.id,
+          isFinal: segment.isFinal,
+          textLength: chunk.length
+        });
+        spokenVoiceKeysRef.current.add(key);
+        voiceQueueRef.current.push({ key, text: chunk });
+        queuedCount += 1;
       }
 
-      console.info("[frontend] eligible for TTS", {
-        segmentId: segment.id,
-        isFinal: segment.isFinal,
-        textLength: normalizedText.length
-      });
-      spokenVoiceKeysRef.current.add(key);
-      voiceQueueRef.current.push({ key, text: normalizedText });
+      if (queuedCount === 0) return;
       updateVoiceQueueLength();
       console.info("[frontend] audio queued", {
         queueLength: voiceQueueRef.current.length
@@ -801,7 +876,6 @@ export function useLiveTranscription() {
   }, []);
 
   useEffect(() => {
-    const voiceCache = voiceCacheRef.current;
     return () => {
       if (recorderRef.current?.state !== "inactive") {
         recorderRef.current?.stop();
@@ -810,10 +884,6 @@ export function useLiveTranscription() {
       socketRef.current?.disconnect();
       clearDisplayHoldTimer();
       stopVoice();
-      for (const audioUrl of voiceCache.values()) {
-        URL.revokeObjectURL(audioUrl);
-      }
-      voiceCache.clear();
     };
   }, [clearDisplayHoldTimer, stopVoice]);
 
@@ -839,6 +909,7 @@ export function useLiveTranscription() {
       isVoiceConfigured,
       isVoiceEnabled,
       isVoicePlaying,
+      isVoicePreparing,
       voiceQueueLength,
       voiceError,
       setVoiceEnabled,
@@ -871,6 +942,7 @@ export function useLiveTranscription() {
       isVoiceConfigured,
       isVoiceEnabled,
       isVoicePlaying,
+      isVoicePreparing,
       voiceQueueLength,
       voiceError,
       setVoiceEnabled,

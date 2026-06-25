@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getTtsStatus, synthesizeTranslatedSpeech, VoicePlaybackError } from "@/server/tts";
+import { getTtsStatus, streamTranslatedSpeech, synthesizeTranslatedSpeech, VoicePlaybackError } from "@/server/tts";
 
 const ttsRequestSchema = z.object({
   text: z.string().trim().min(1).max(1000)
@@ -10,17 +10,38 @@ function jsonError(message: string, status: number, code?: string) {
   return NextResponse.json({ error: message, code }, { status });
 }
 
-export async function GET() {
+function voiceErrorStatus(error: VoicePlaybackError) {
+  return error.code === "OPENAI_TTS_DISABLED" ? 403 : error.code === "OPENAI_TTS_NOT_CONFIGURED" ? 503 : 502;
+}
+
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const text = url.searchParams.get("text");
+    if (text) {
+      const parsed = ttsRequestSchema.safeParse({ text });
+      if (!parsed.success) {
+        return jsonError("Invalid voice playback request", 400, "OPENAI_TTS_FAILED");
+      }
+
+      const result = await streamTranslatedSpeech(parsed.data.text);
+      return new Response(result.body, {
+        status: 200,
+        headers: {
+          "Content-Type": result.contentType,
+          "Cache-Control": "no-store",
+          "X-TTS-Cache": result.cached ? "hit" : "miss"
+        }
+      });
+    }
+
     return NextResponse.json(getTtsStatus());
-  } catch {
-    return NextResponse.json({
-      enabled: false,
-      configured: false,
-      model: "gpt-4o-mini-tts",
-      voice: "coral",
-      format: "mp3"
-    });
+  } catch (error) {
+    if (error instanceof VoicePlaybackError) {
+      return jsonError(error.message, voiceErrorStatus(error), error.code);
+    }
+
+    return jsonError("OpenAI voice playback failed", 500, "OPENAI_TTS_FAILED");
   }
 }
 
@@ -43,8 +64,7 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof VoicePlaybackError) {
-      const status = error.code === "OPENAI_TTS_DISABLED" ? 403 : error.code === "OPENAI_TTS_NOT_CONFIGURED" ? 503 : 502;
-      return jsonError(error.message, status, error.code);
+      return jsonError(error.message, voiceErrorStatus(error), error.code);
     }
 
     return jsonError("OpenAI voice playback failed", 500, "OPENAI_TTS_FAILED");
