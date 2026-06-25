@@ -2,14 +2,14 @@
 
 Browser microphone capture, Deepgram real-time transcription, OpenAI translation, multi-screen live viewing, transcript history, and TXT/SRT export.
 
-Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
+Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates interim and final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
 
 ## Features
 
 - Browser microphone capture with `MediaRecorder`
 - Live audio streaming over Socket.io
 - Deepgram streaming speech-to-text with interim and final transcripts
-- OpenAI `gpt-4o-mini` translation for final transcript segments
+- OpenAI `gpt-4o-mini` translation for interim and final transcript segments
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
 - Viewers receive original and translated subtitles over Socket.io rooms
@@ -30,7 +30,7 @@ flowchart LR
   Browser["Browser<br/>MediaRecorder"] -->|"audio chunks<br/>Socket.io"| Server["Custom Node Server<br/>Next.js + Socket.io"]
   Server -->|"stream audio"| Deepgram["Deepgram<br/>Streaming API"]
   Deepgram -->|"interim/final transcripts"| Server
-  Server -->|"final transcript"| OpenAI["OpenAI<br/>gpt-4o-mini"]
+  Server -->|"interim/final transcript"| OpenAI["OpenAI<br/>gpt-4o-mini"]
   OpenAI -->|"translation"| Server
   Server -->|"original + translated subtitles"| Broadcaster["Broadcaster Screen"]
   Server -->|"room broadcast"| Viewers["Viewer Screens"]
@@ -53,6 +53,10 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 PORT=3000
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_ENDPOINTING_MS=60
+INTERIM_TRANSLATION_ENABLED=true
+INTERIM_TRANSLATION_MIN_CHARS=4
+INTERIM_TRANSLATION_MIN_INTERVAL_MS=180
+FINAL_TRANSLATION_DEBOUNCE_MS=80
 OPENAI_TRANSLATION_TIMEOUT_MS=1800
 OPENAI_TRANSLATION_MAX_TOKENS=70
 ```
@@ -65,6 +69,10 @@ Environment variable reference:
 - `PORT`: Local development port. Railway and Render inject this automatically in production.
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
+- `INTERIM_TRANSLATION_ENABLED`: Enables speculative OpenAI translation for Deepgram interim transcripts. Default: `true`.
+- `INTERIM_TRANSLATION_MIN_CHARS`: Minimum interim transcript length before translation starts. Default: `4`.
+- `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `180`.
+- `FINAL_TRANSLATION_DEBOUNCE_MS`: Short debounce before final transcript translation. Default: `80`.
 - `OPENAI_TRANSLATION_TIMEOUT_MS`: OpenAI request timeout in milliseconds. Default: `1800`.
 - `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
 
@@ -103,6 +111,10 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `NEXT_PUBLIC_APP_URL=https://your-service.up.railway.app`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
+   - `INTERIM_TRANSLATION_ENABLED=true`
+   - `INTERIM_TRANSLATION_MIN_CHARS=4`
+   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=180`
+   - `FINAL_TRANSLATION_DEBOUNCE_MS=80`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Railway settings:
@@ -122,6 +134,10 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `NEXT_PUBLIC_APP_URL=https://your-service.onrender.com`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
+   - `INTERIM_TRANSLATION_ENABLED=true`
+   - `INTERIM_TRANSLATION_MIN_CHARS=4`
+   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=180`
+   - `FINAL_TRANSLATION_DEBOUNCE_MS=80`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Render settings:
@@ -194,9 +210,11 @@ Returns session metadata and recent final transcript segments.
 - Browser audio is sent in 75 ms chunks.
 - Socket.io uses WebSocket with polling fallback and per-message compression disabled.
 - Deepgram model and endpointing are configurable; defaults are `DEEPGRAM_MODEL=nova-3` and `DEEPGRAM_ENDPOINTING_MS=60`.
-- Interim Deepgram transcripts are displayed immediately.
+- Interim Deepgram transcripts are translated speculatively with OpenAI when `INTERIM_TRANSLATION_ENABLED=true`.
+- Interim translation requests are throttled with `INTERIM_TRANSLATION_MIN_INTERVAL_MS` and skipped until `INTERIM_TRANSLATION_MIN_CHARS` is reached.
+- Stale interim OpenAI responses are ignored if a newer interim transcript has already arrived.
 - Final transcripts are stored in session history and replayed to new viewers.
-- Final transcripts are translated with OpenAI when `OPENAI_API_KEY` is configured.
+- Final transcripts replace speculative interim translations and are stored/exported after OpenAI translation completes.
 - OpenAI errors do not stop the session or microphone stream.
 
 The sub-second target depends on microphone/browser scheduling, network distance to Deepgram, language/model availability, and hosting location.

@@ -31,7 +31,7 @@ export function SubtitlePanel({
   const liveSegment = interimSegment ?? segments.at(-1) ?? null;
   const recentSegments = segments.slice(-3);
   const isConnected = connectionState === "connected";
-  const waitingForTranslation = "Tarjima kutilmoqda\u2026";
+  const translationPending = "Tarjima qilinmoqda\u2026";
 
   return (
     <section
@@ -102,14 +102,20 @@ export function SubtitlePanel({
                 </span>
               )}
             </div>
-            <p
-              className={cn(
-                "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
-                liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
-              )}
-            >
-              {liveSegment.translatedText || waitingForTranslation}
-            </p>
+            {liveSegment.translatedText ? (
+              <p
+                className={cn(
+                  "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
+                  liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
+                )}
+              >
+                {liveSegment.translatedText}
+              </p>
+            ) : (
+              <p className="mx-auto rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">
+                {translationPending}
+              </p>
+            )}
           </div>
         ) : (
           <div className="relative grid gap-3 text-center">
@@ -124,7 +130,7 @@ export function SubtitlePanel({
           <div className="grid gap-1.5">
             {recentSegments.map((segment) => (
               <p key={segment.id} className="truncate rounded-lg px-3 py-1.5 text-sm text-slate-400">
-                {segment.translatedText || waitingForTranslation}
+                {segment.translatedText || translationPending}
               </p>
             ))}
           </div>

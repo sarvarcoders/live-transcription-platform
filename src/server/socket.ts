@@ -10,7 +10,8 @@ import type {
 } from "@/shared/types";
 import { sessionStore } from "./sessions";
 import { DeepgramStream } from "./deepgram";
-import { classifyTranslationError, streamTranslateTranscript } from "./translator";
+import { getServerEnv } from "./env";
+import { classifyTranslationError, normalizeTranscriptText, streamTranslateTranscript } from "./translator";
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type TranslationSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -19,6 +20,8 @@ const activeStreams = new Map<string, DeepgramStream>();
 const audioChunkStatsBySession = new Map<string, { count: number; totalBytes: number; lastChunkAt?: number }>();
 const noAudioTimersBySession = new Map<string, NodeJS.Timeout>();
 const lastAudioTimingBySession = new Map<string, { capturedAt: number; sentAt: number; audioReceivedAt: number }>();
+const interimTranslationStateBySession = new Map<string, { requestId: number; text: string; lastRequestedAt: number }>();
+const finalTranslationTimersBySession = new Map<string, Set<NodeJS.Timeout>>();
 
 function roomName(sessionId: string) {
   return `session:${sessionId}`;
@@ -92,6 +95,7 @@ function resetAudioState(sessionId: string) {
   audioChunkStatsBySession.delete(sessionId);
   clearNoAudioTimer(sessionId);
   lastAudioTimingBySession.delete(sessionId);
+  interimTranslationStateBySession.delete(sessionId);
 }
 
 function baseMetrics(sessionId: string, deepgramReceivedAt: number): LatencyMetrics {
@@ -106,7 +110,120 @@ function baseMetrics(sessionId: string, deepgramReceivedAt: number): LatencyMetr
   };
 }
 
+function getPreviousTranslationContext(sessionId: string, currentSegmentId: string) {
+  const previous = sessionStore
+    .getTranscript(sessionId)
+    .filter((segment) => segment.id !== currentSegmentId && segment.isFinal && segment.translatedText)
+    .at(-1);
+
+  return previous
+    ? {
+        sourceContext: previous.text,
+        translationContext: previous.translatedText
+      }
+    : {};
+}
+
+function translateInterimSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+  const env = getServerEnv();
+  if (!env.INTERIM_TRANSLATION_ENABLED) return;
+
+  const normalizedText = normalizeTranscriptText(segment.text);
+  if (normalizedText.length < env.INTERIM_TRANSLATION_MIN_CHARS) return;
+
+  const currentState = interimTranslationStateBySession.get(sessionId);
+  const now = Date.now();
+  if (currentState?.text === normalizedText) return;
+  if (currentState && now - currentState.lastRequestedAt < env.INTERIM_TRANSLATION_MIN_INTERVAL_MS) return;
+
+  const requestId = (currentState?.requestId ?? 0) + 1;
+  interimTranslationStateBySession.set(sessionId, {
+    requestId,
+    text: normalizedText,
+    lastRequestedAt: now
+  });
+
+  const translationStartedAt = Date.now();
+  let firstTokenAt: number | undefined;
+
+  streamTranslateTranscript({
+    text: normalizedText,
+    sourceLanguage: segment.sourceLanguage,
+    targetLanguage: segment.targetLanguage,
+    ...getPreviousTranslationContext(sessionId, segment.id),
+    onFirstToken: () => {
+      firstTokenAt = Date.now();
+    },
+    onToken: (partialText) => {
+      const latestState = interimTranslationStateBySession.get(sessionId);
+      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
+
+      emitSegment(io, sessionId, {
+        ...segment,
+        translatedText: partialText,
+        translationStatus: "pending",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt,
+          firstTokenAt,
+          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined
+        }
+      });
+    }
+  })
+    .then((translatedText) => {
+      const latestState = interimTranslationStateBySession.get(sessionId);
+      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
+
+      const translationCompletedAt = Date.now();
+      emitSegment(io, sessionId, {
+        ...segment,
+        translatedText,
+        translationStatus: "pending",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt,
+          firstTokenAt,
+          translationCompletedAt,
+          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined,
+          openaiTotalLatencyMs: translationCompletedAt - translationStartedAt
+        }
+      });
+    })
+    .catch((error: unknown) => {
+      const latestState = interimTranslationStateBySession.get(sessionId);
+      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
+
+      const classifiedError = classifyTranslationError(error);
+      console.warn("[socket] interim translation failed", {
+        sessionId,
+        code: classifiedError.code,
+        message: classifiedError.message
+      });
+      emitSegment(io, sessionId, {
+        ...segment,
+        translatedText: classifiedError.message,
+        translationStatus: "error",
+        metrics: {
+          ...segment.metrics,
+          translationStartedAt
+        }
+      });
+      io.to(roomName(sessionId)).emit("server:error", {
+        code: classifiedError.code,
+        message: classifiedError.message
+      });
+    });
+}
+
 function translateFinalSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+  const currentState = interimTranslationStateBySession.get(sessionId);
+  interimTranslationStateBySession.set(sessionId, {
+    requestId: (currentState?.requestId ?? 0) + 1,
+    text: normalizeTranscriptText(segment.text),
+    lastRequestedAt: 0
+  });
+
   const translationStartedAt = Date.now();
   let firstTokenAt: number | undefined;
 
@@ -114,6 +231,7 @@ function translateFinalSegment(io: TranslationServer, sessionId: string, segment
     text: segment.text,
     sourceLanguage: segment.sourceLanguage,
     targetLanguage: segment.targetLanguage,
+    ...getPreviousTranslationContext(sessionId, segment.id),
     onFirstToken: () => {
       firstTokenAt = Date.now();
     },
@@ -172,6 +290,27 @@ function translateFinalSegment(io: TranslationServer, sessionId: string, segment
         message: classifiedError.message
       });
     });
+}
+
+function scheduleFinalTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+  const debounceMs = getServerEnv().FINAL_TRANSLATION_DEBOUNCE_MS;
+  const run = () => translateFinalSegment(io, sessionId, segment);
+
+  if (debounceMs <= 0) {
+    run();
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    const timersForSession = finalTranslationTimersBySession.get(sessionId);
+    timersForSession?.delete(timer);
+    if (timersForSession?.size === 0) finalTranslationTimersBySession.delete(sessionId);
+    run();
+  }, debounceMs);
+
+  const timers = finalTranslationTimersBySession.get(sessionId) ?? new Set<NodeJS.Timeout>();
+  timers.add(timer);
+  finalTranslationTimersBySession.set(sessionId, timers);
 }
 
 export function registerSocketHandlers(io: TranslationServer) {
@@ -269,7 +408,9 @@ export function registerSocketHandlers(io: TranslationServer) {
 
           if (transcript.isFinal) {
             sessionStore.addTranscript(sessionId, segment);
-            translateFinalSegment(io, sessionId, segment);
+            scheduleFinalTranslation(io, sessionId, segment);
+          } else {
+            translateInterimSegment(io, sessionId, segment);
           }
 
           emitSegment(io, sessionId, segment);
