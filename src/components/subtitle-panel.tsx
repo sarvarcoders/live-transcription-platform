@@ -31,6 +31,7 @@ export function SubtitlePanel({
   const liveSegment = interimSegment ?? segments.at(-1) ?? null;
   const recentSegments = segments.slice(-3);
   const isConnected = connectionState === "connected";
+  const waitingForTranslation = "Tarjima kutilmoqda\u2026";
 
   return (
     <section
@@ -90,7 +91,7 @@ export function SubtitlePanel({
             <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium text-slate-400">
               <span>{formatTime(liveSegment.startedAt)}</span>
               <span className="h-1 w-1 rounded-full bg-slate-600" />
-              <span>{getLanguageLabel(liveSegment.sourceLanguage)}</span>
+              <span>{session ? getLanguageLabel(session.targetLanguage) : getLanguageLabel(liveSegment.targetLanguage)}</span>
               {!liveSegment.isFinal ? (
                 <span className="rounded-full bg-amber-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-amber-100">
                   {copy.interim}
@@ -101,21 +102,14 @@ export function SubtitlePanel({
                 </span>
               )}
             </div>
-            <p className="text-balance text-5xl font-semibold leading-tight tracking-tight text-white sm:text-6xl lg:text-7xl xl:text-8xl">
-              {liveSegment.text}
+            <p
+              className={cn(
+                "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
+                liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
+              )}
+            >
+              {liveSegment.translatedText || waitingForTranslation}
             </p>
-            {liveSegment.isFinal && liveSegment.translatedText ? (
-              <p
-                className={cn(
-                  "mx-auto max-w-5xl text-balance text-2xl font-semibold leading-snug sm:text-3xl lg:text-4xl",
-                  liveSegment.translationStatus === "error" ? "text-rose-200" : "text-cyan-100"
-                )}
-              >
-                {liveSegment.translatedText}
-              </p>
-            ) : liveSegment.isFinal && liveSegment.translationStatus === "pending" ? (
-              <p className="text-base font-medium text-cyan-200/70">Translating...</p>
-            ) : null}
           </div>
         ) : (
           <div className="relative grid gap-3 text-center">
@@ -130,7 +124,7 @@ export function SubtitlePanel({
           <div className="grid gap-1.5">
             {recentSegments.map((segment) => (
               <p key={segment.id} className="truncate rounded-lg px-3 py-1.5 text-sm text-slate-400">
-                {segment.translatedText ? `${segment.text} · ${segment.translatedText}` : segment.text}
+                {segment.translatedText || waitingForTranslation}
               </p>
             ))}
           </div>
