@@ -22,6 +22,7 @@ type StoredSessionCredentials = {
 const SESSION_STORAGE_KEY = "live-translation-session";
 const AUDIO_CHUNK_MS = 75;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
+const SUBTITLE_MIN_DISPLAY_MS = 1000;
 
 const STALE_SESSION_ERROR_CODES = new Set(["SESSION_HOST_DENIED", "SESSION_NOT_FOUND"]);
 const TRANSLATION_ERROR_CODES = new Set([
@@ -74,6 +75,8 @@ export function useLiveTranscription() {
   const [pendingTranslation, setPendingTranslation] = useState<TranscriptSegment | null>(null);
   const [isTranslationPending, setIsTranslationPending] = useState(false);
   const [lastFinalTranslation, setLastFinalTranslation] = useState<string | null>(null);
+  const [currentSegmentId, setCurrentSegmentId] = useState<string | null>(null);
+  const [lastDisplayUpdateAt, setLastDisplayUpdateAt] = useState(0);
   const [latencySamples, setLatencySamples] = useState<LatencyMetrics[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -81,15 +84,80 @@ export function useLiveTranscription() {
   const [hasBroadcasterToken, setHasBroadcasterToken] = useState(false);
   const latestAcceptedTranslationStartedAtRef = useRef(0);
   const latestSeenTranscriptStartedAtRef = useRef(0);
+  const lastDisplayedTranslationRef = useRef<string | null>(null);
+  const lastDisplayUpdateAtRef = useRef(0);
+  const displayHoldTimerRef = useRef<number | null>(null);
+  const queuedDisplayRef = useRef<TranscriptSegment | null>(null);
+
+  const clearDisplayHoldTimer = useCallback(() => {
+    if (displayHoldTimerRef.current) {
+      window.clearTimeout(displayHoldTimerRef.current);
+      displayHoldTimerRef.current = null;
+    }
+  }, []);
+
+  const applyDisplayedTranslation = useCallback((segment: TranscriptSegment) => {
+    if (!segment.translatedText) return;
+    const now = Date.now();
+    lastDisplayedTranslationRef.current = segment.translatedText;
+    lastDisplayUpdateAtRef.current = now;
+    latestAcceptedTranslationStartedAtRef.current = segment.metrics?.translationStartedAt ?? now;
+    setLastDisplayedTranslation(segment.translatedText);
+    setCurrentSegmentId(segment.id);
+    setLastDisplayUpdateAt(now);
+    setPendingTranslation(segment.translationStatus === "pending" ? segment : null);
+    setIsTranslationPending(segment.translationStatus === "pending");
+    if (segment.isFinal && segment.translationStatus === "complete") {
+      setLastFinalTranslation(segment.translatedText);
+    }
+  }, []);
+
+  const queueDisplayedTranslation = useCallback(
+    (segment: TranscriptSegment) => {
+      if (!segment.translatedText) return;
+      const now = Date.now();
+      const isFinalComplete = segment.isFinal && segment.translationStatus === "complete";
+      const hasDisplayedTranslation = Boolean(lastDisplayedTranslationRef.current);
+      const elapsed = now - lastDisplayUpdateAtRef.current;
+
+      if (isFinalComplete || !hasDisplayedTranslation || elapsed >= SUBTITLE_MIN_DISPLAY_MS) {
+        clearDisplayHoldTimer();
+        queuedDisplayRef.current = null;
+        applyDisplayedTranslation(segment);
+        return;
+      }
+
+      queuedDisplayRef.current = segment;
+      setPendingTranslation(segment);
+      setIsTranslationPending(true);
+      clearDisplayHoldTimer();
+      displayHoldTimerRef.current = window.setTimeout(() => {
+        const queuedSegment = queuedDisplayRef.current;
+        queuedDisplayRef.current = null;
+        displayHoldTimerRef.current = null;
+        const queuedTranslationStartedAt = queuedSegment?.metrics?.translationStartedAt ?? 0;
+        if (queuedSegment?.translatedText && queuedTranslationStartedAt >= latestAcceptedTranslationStartedAtRef.current) {
+          applyDisplayedTranslation(queuedSegment);
+        }
+      }, SUBTITLE_MIN_DISPLAY_MS - elapsed);
+    },
+    [applyDisplayedTranslation, clearDisplayHoldTimer]
+  );
 
   const resetTranslationDisplay = useCallback(() => {
+    clearDisplayHoldTimer();
     latestAcceptedTranslationStartedAtRef.current = 0;
     latestSeenTranscriptStartedAtRef.current = 0;
+    lastDisplayedTranslationRef.current = null;
+    lastDisplayUpdateAtRef.current = 0;
+    queuedDisplayRef.current = null;
     setLastDisplayedTranslation(null);
     setPendingTranslation(null);
     setIsTranslationPending(false);
     setLastFinalTranslation(null);
-  }, []);
+    setCurrentSegmentId(null);
+    setLastDisplayUpdateAt(0);
+  }, [clearDisplayHoldTimer]);
 
   const stopLocalRecording = useCallback(() => {
     if (recorderRef.current?.state !== "inactive") {
@@ -218,12 +286,7 @@ export function useLiveTranscription() {
       } else if (measuredSegment.translatedText) {
         if (isLatestTranscriptUpdate && translationStartedAt >= latestAcceptedTranslationStartedAtRef.current) {
           latestAcceptedTranslationStartedAtRef.current = translationStartedAt;
-          setLastDisplayedTranslation(measuredSegment.translatedText);
-          setPendingTranslation(measuredSegment.translationStatus === "pending" ? measuredSegment : null);
-          setIsTranslationPending(measuredSegment.translationStatus === "pending");
-          if (measuredSegment.isFinal && measuredSegment.translationStatus === "complete") {
-            setLastFinalTranslation(measuredSegment.translatedText);
-          }
+          queueDisplayedTranslation(measuredSegment);
         }
       } else if (isLatestTranscriptUpdate && (measuredSegment.translationStatus === "pending" || !measuredSegment.isFinal)) {
         setPendingTranslation(measuredSegment);
@@ -280,7 +343,7 @@ export function useLiveTranscription() {
 
     socketRef.current = socket;
     return socket;
-  }, [clearLocalSessionState, stopLocalRecording]);
+  }, [clearLocalSessionState, queueDisplayedTranslation, stopLocalRecording]);
 
   const waitForConnectedSocket = useCallback(async () => {
     const socket = connect();
@@ -509,8 +572,9 @@ export function useLiveTranscription() {
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
       socketRef.current?.disconnect();
+      clearDisplayHoldTimer();
     };
-  }, []);
+  }, [clearDisplayHoldTimer]);
 
   return useMemo(
     () => ({
@@ -523,6 +587,8 @@ export function useLiveTranscription() {
       pendingTranslation,
       isTranslationPending,
       lastFinalTranslation,
+      currentSegmentId,
+      lastDisplayUpdateAt,
       latencySamples,
       error,
       isRecording,
@@ -545,6 +611,8 @@ export function useLiveTranscription() {
       pendingTranslation,
       isTranslationPending,
       lastFinalTranslation,
+      currentSegmentId,
+      lastDisplayUpdateAt,
       latencySamples,
       error,
       isRecording,

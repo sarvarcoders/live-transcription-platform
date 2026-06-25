@@ -15,12 +15,20 @@ import { classifyTranslationError, normalizeTranscriptText, streamTranslateTrans
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type TranslationSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type InterimTranslationState = {
+  requestId: number;
+  text: string;
+  lastRequestedAt: number;
+  lastRawText?: string;
+  repeatedCount: number;
+  stabilityTimer?: NodeJS.Timeout;
+};
 
 const activeStreams = new Map<string, DeepgramStream>();
 const audioChunkStatsBySession = new Map<string, { count: number; totalBytes: number; lastChunkAt?: number }>();
 const noAudioTimersBySession = new Map<string, NodeJS.Timeout>();
 const lastAudioTimingBySession = new Map<string, { capturedAt: number; sentAt: number; audioReceivedAt: number }>();
-const interimTranslationStateBySession = new Map<string, { requestId: number; text: string; lastRequestedAt: number }>();
+const interimTranslationStateBySession = new Map<string, InterimTranslationState>();
 const finalTranslationTimersBySession = new Map<string, Set<NodeJS.Timeout>>();
 
 function roomName(sessionId: string) {
@@ -90,11 +98,23 @@ function clearNoAudioTimer(sessionId: string) {
   noAudioTimersBySession.delete(sessionId);
 }
 
+function clearInterimStabilityTimer(sessionId: string) {
+  const state = interimTranslationStateBySession.get(sessionId);
+  if (state?.stabilityTimer) clearTimeout(state.stabilityTimer);
+  if (state) {
+    interimTranslationStateBySession.set(sessionId, {
+      ...state,
+      stabilityTimer: undefined
+    });
+  }
+}
+
 function resetAudioState(sessionId: string) {
   activeStreams.delete(sessionId);
   audioChunkStatsBySession.delete(sessionId);
   clearNoAudioTimer(sessionId);
   lastAudioTimingBySession.delete(sessionId);
+  clearInterimStabilityTimer(sessionId);
   interimTranslationStateBySession.delete(sessionId);
 }
 
@@ -124,23 +144,60 @@ function getPreviousTranslationContext(sessionId: string, currentSegmentId: stri
     : {};
 }
 
-function translateInterimSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+function countWords(text: string) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+function segmentTranscriptPhrase(text: string, maxChars: number) {
+  const normalizedText = normalizeTranscriptText(text);
+  if (normalizedText.length <= maxChars && countWords(normalizedText) <= 12) return normalizedText;
+
+  const punctuationMatches = [...normalizedText.matchAll(/[.!?;:,]/g)]
+    .map((match) => match.index ?? -1)
+    .filter((index) => index >= 20 && index < maxChars);
+  const punctuationCut = punctuationMatches.at(-1);
+  if (punctuationCut) return normalizedText.slice(0, punctuationCut + 1).trim();
+
+  const words = normalizedText.split(/\s+/).filter(Boolean);
+  if (words.length > 12) {
+    const firstTwelveWords = words.slice(0, 12).join(" ");
+    if (firstTwelveWords.length <= maxChars) return firstTwelveWords;
+  }
+
+  const safeCut = normalizedText.lastIndexOf(" ", maxChars);
+  if (safeCut >= 20) return normalizedText.slice(0, safeCut).trim();
+  return normalizedText.slice(0, maxChars).trim();
+}
+
+function requestInterimTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment, candidateText: string) {
   const env = getServerEnv();
   if (!env.INTERIM_TRANSLATION_ENABLED) return;
 
-  const normalizedText = normalizeTranscriptText(segment.text);
+  const normalizedText = segmentTranscriptPhrase(candidateText, env.SUBTITLE_MAX_CHARS);
   if (normalizedText.length < env.INTERIM_TRANSLATION_MIN_CHARS) return;
 
   const currentState = interimTranslationStateBySession.get(sessionId);
   const now = Date.now();
   if (currentState?.text === normalizedText) return;
-  if (currentState && now - currentState.lastRequestedAt < env.INTERIM_TRANSLATION_MIN_INTERVAL_MS) return;
+  if (currentState && now - currentState.lastRequestedAt < env.INTERIM_TRANSLATION_MIN_INTERVAL_MS) {
+    clearInterimStabilityTimer(sessionId);
+    const delay = env.INTERIM_TRANSLATION_MIN_INTERVAL_MS - (now - currentState.lastRequestedAt);
+    const timer = setTimeout(() => requestInterimTranslation(io, sessionId, segment, normalizedText), delay);
+    interimTranslationStateBySession.set(sessionId, {
+      ...currentState,
+      stabilityTimer: timer
+    });
+    return;
+  }
 
   const requestId = (currentState?.requestId ?? 0) + 1;
   interimTranslationStateBySession.set(sessionId, {
+    ...currentState,
     requestId,
     text: normalizedText,
-    lastRequestedAt: now
+    lastRequestedAt: now,
+    repeatedCount: currentState?.repeatedCount ?? 0,
+    stabilityTimer: undefined
   });
 
   const translationStartedAt = Date.now();
@@ -160,6 +217,7 @@ function translateInterimSegment(io: TranslationServer, sessionId: string, segme
 
       emitSegment(io, sessionId, {
         ...segment,
+        text: normalizedText,
         translatedText: partialText,
         translationStatus: "pending",
         metrics: {
@@ -178,6 +236,7 @@ function translateInterimSegment(io: TranslationServer, sessionId: string, segme
       const translationCompletedAt = Date.now();
       emitSegment(io, sessionId, {
         ...segment,
+        text: normalizedText,
         translatedText,
         translationStatus: "pending",
         metrics: {
@@ -202,7 +261,6 @@ function translateInterimSegment(io: TranslationServer, sessionId: string, segme
       });
       emitSegment(io, sessionId, {
         ...segment,
-        translatedText: classifiedError.message,
         translationStatus: "error",
         metrics: {
           ...segment.metrics,
@@ -216,12 +274,53 @@ function translateInterimSegment(io: TranslationServer, sessionId: string, segme
     });
 }
 
+function scheduleInterimTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
+  const env = getServerEnv();
+  if (!env.INTERIM_TRANSLATION_ENABLED) return;
+
+  const rawText = normalizeTranscriptText(segment.text);
+  if (rawText.length < env.INTERIM_TRANSLATION_MIN_CHARS) return;
+
+  const currentState = interimTranslationStateBySession.get(sessionId);
+  const repeatedCount = currentState?.lastRawText === rawText ? currentState.repeatedCount + 1 : 1;
+  const nextState: InterimTranslationState = {
+    requestId: currentState?.requestId ?? 0,
+    text: currentState?.text ?? "",
+    lastRequestedAt: currentState?.lastRequestedAt ?? 0,
+    lastRawText: rawText,
+    repeatedCount
+  };
+
+  if (currentState?.stabilityTimer) clearTimeout(currentState.stabilityTimer);
+
+  if (repeatedCount >= 2) {
+    interimTranslationStateBySession.set(sessionId, nextState);
+    requestInterimTranslation(io, sessionId, segment, rawText);
+    return;
+  }
+
+  const stabilityTimer = setTimeout(() => {
+    const latestState = interimTranslationStateBySession.get(sessionId);
+    if (latestState?.lastRawText !== rawText) return;
+    requestInterimTranslation(io, sessionId, segment, rawText);
+  }, env.INTERIM_TRANSLATION_STABILITY_MS);
+
+  interimTranslationStateBySession.set(sessionId, {
+    ...nextState,
+    stabilityTimer
+  });
+}
+
 function translateFinalSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
   const currentState = interimTranslationStateBySession.get(sessionId);
+  if (currentState?.stabilityTimer) clearTimeout(currentState.stabilityTimer);
   interimTranslationStateBySession.set(sessionId, {
+    ...currentState,
     requestId: (currentState?.requestId ?? 0) + 1,
     text: normalizeTranscriptText(segment.text),
-    lastRequestedAt: 0
+    lastRequestedAt: 0,
+    repeatedCount: currentState?.repeatedCount ?? 0,
+    stabilityTimer: undefined
   });
 
   const translationStartedAt = Date.now();
@@ -271,7 +370,6 @@ function translateFinalSegment(io: TranslationServer, sessionId: string, segment
       const classifiedError = classifyTranslationError(error);
       const failedSegment: TranscriptSegment = {
         ...segment,
-        translatedText: classifiedError.message,
         translationStatus: "error",
         metrics: {
           ...segment.metrics,
@@ -410,7 +508,7 @@ export function registerSocketHandlers(io: TranslationServer) {
             sessionStore.addTranscript(sessionId, segment);
             scheduleFinalTranslation(io, sessionId, segment);
           } else {
-            translateInterimSegment(io, sessionId, segment);
+            scheduleInterimTranslation(io, sessionId, segment);
           }
 
           emitSegment(io, sessionId, segment);

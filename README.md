@@ -54,9 +54,12 @@ PORT=3000
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_ENDPOINTING_MS=60
 INTERIM_TRANSLATION_ENABLED=true
-INTERIM_TRANSLATION_MIN_CHARS=4
-INTERIM_TRANSLATION_MIN_INTERVAL_MS=180
-FINAL_TRANSLATION_DEBOUNCE_MS=80
+INTERIM_TRANSLATION_MIN_CHARS=8
+INTERIM_TRANSLATION_MIN_INTERVAL_MS=350
+INTERIM_TRANSLATION_STABILITY_MS=400
+SUBTITLE_MIN_DISPLAY_MS=1000
+SUBTITLE_MAX_CHARS=120
+FINAL_TRANSLATION_DEBOUNCE_MS=120
 OPENAI_TRANSLATION_TIMEOUT_MS=1800
 OPENAI_TRANSLATION_MAX_TOKENS=70
 ```
@@ -70,9 +73,12 @@ Environment variable reference:
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
 - `INTERIM_TRANSLATION_ENABLED`: Enables speculative OpenAI translation for Deepgram interim transcripts. Default: `true`.
-- `INTERIM_TRANSLATION_MIN_CHARS`: Minimum interim transcript length before translation starts. Default: `4`.
-- `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `180`.
-- `FINAL_TRANSLATION_DEBOUNCE_MS`: Short debounce before final transcript translation. Default: `80`.
+- `INTERIM_TRANSLATION_MIN_CHARS`: Minimum stable interim transcript length before translation starts. Default: `8`.
+- `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `350`.
+- `INTERIM_TRANSLATION_STABILITY_MS`: How long interim text should stay unchanged before it is considered stable. Default: `400`.
+- `SUBTITLE_MIN_DISPLAY_MS`: Minimum time the center subtitle should remain visible before another interim subtitle replaces it. Default: `1000`.
+- `SUBTITLE_MAX_CHARS`: Maximum source phrase length sent for one interim subtitle chunk. Default: `120`.
+- `FINAL_TRANSLATION_DEBOUNCE_MS`: Short debounce before final transcript translation. Default: `120`.
 - `OPENAI_TRANSLATION_TIMEOUT_MS`: OpenAI request timeout in milliseconds. Default: `1800`.
 - `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
 
@@ -112,9 +118,12 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
    - `INTERIM_TRANSLATION_ENABLED=true`
-   - `INTERIM_TRANSLATION_MIN_CHARS=4`
-   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=180`
-   - `FINAL_TRANSLATION_DEBOUNCE_MS=80`
+   - `INTERIM_TRANSLATION_MIN_CHARS=8`
+   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
+   - `INTERIM_TRANSLATION_STABILITY_MS=400`
+   - `SUBTITLE_MIN_DISPLAY_MS=1000`
+   - `SUBTITLE_MAX_CHARS=120`
+   - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Railway settings:
@@ -135,9 +144,12 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
    - `INTERIM_TRANSLATION_ENABLED=true`
-   - `INTERIM_TRANSLATION_MIN_CHARS=4`
-   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=180`
-   - `FINAL_TRANSLATION_DEBOUNCE_MS=80`
+   - `INTERIM_TRANSLATION_MIN_CHARS=8`
+   - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
+   - `INTERIM_TRANSLATION_STABILITY_MS=400`
+   - `SUBTITLE_MIN_DISPLAY_MS=1000`
+   - `SUBTITLE_MAX_CHARS=120`
+   - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Render settings:
@@ -210,8 +222,11 @@ Returns session metadata and recent final transcript segments.
 - Browser audio is sent in 75 ms chunks.
 - Socket.io uses WebSocket with polling fallback and per-message compression disabled.
 - Deepgram model and endpointing are configurable; defaults are `DEEPGRAM_MODEL=nova-3` and `DEEPGRAM_ENDPOINTING_MS=60`.
-- Interim Deepgram transcripts are translated speculatively with OpenAI when `INTERIM_TRANSLATION_ENABLED=true`.
+- Interim Deepgram transcripts pass through a stable-text detector before OpenAI translation.
+- Interim text is considered stable after repeated matching interim results or `INTERIM_TRANSLATION_STABILITY_MS`.
+- Stable interim text is segmented into readable phrase chunks using punctuation, word count, and `SUBTITLE_MAX_CHARS`.
 - Interim translation requests are throttled with `INTERIM_TRANSLATION_MIN_INTERVAL_MS` and skipped until `INTERIM_TRANSLATION_MIN_CHARS` is reached.
+- The center subtitle keeps the last successful translation visible for at least `SUBTITLE_MIN_DISPLAY_MS` unless a final transcript arrives.
 - Stale interim OpenAI responses are ignored if a newer interim transcript has already arrived.
 - Final transcripts are stored in session history and replayed to new viewers.
 - Final transcripts replace speculative interim translations and are stored/exported after OpenAI translation completes.
