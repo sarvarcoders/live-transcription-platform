@@ -55,6 +55,14 @@ export function HostControls({
   const hasSession = Boolean(session);
   const isConnected = connectionState === "connected";
   const canCreate = !hasSession && !isCreating;
+  const statusLabels: Record<BroadcasterStatus, string> = {
+    idle: copy.broadcasterIdle,
+    creating: copy.broadcasterCreating,
+    ready: copy.broadcasterReady,
+    recording: copy.broadcasterRecording,
+    stopped: copy.broadcasterStopped,
+    error: copy.broadcasterError
+  };
   const canStart =
     hasSession &&
     hasBroadcasterToken &&
@@ -71,7 +79,7 @@ export function HostControls({
         : error
           ? copy.resolveError
           : !(status === "ready" || status === "stopped")
-            ? `${copy.currentStatus}: ${status}.`
+            ? `${copy.currentStatus}: ${statusLabels[status]}.`
             : undefined;
 
   const statusTone =
@@ -99,6 +107,7 @@ export function HostControls({
         id="source-language"
         label={copy.speakerLanguage}
         value={sourceLanguage}
+        copy={copy}
         disabled={hasSession}
         onChange={onSourceLanguageChange}
       />
@@ -107,6 +116,7 @@ export function HostControls({
         id="target-language"
         label={copy.targetLanguage}
         value={targetLanguage}
+        copy={copy}
         disabled={hasSession}
         onChange={onTargetLanguageChange}
       />
@@ -117,7 +127,7 @@ export function HostControls({
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{copy.status}</span>
         <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${statusTone}`}>
           <span className={`h-2 w-2 rounded-full ${isRecording ? "animate-pulse bg-rose-500" : isConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-          {status}
+          {statusLabels[status]}
         </span>
       </div>
 

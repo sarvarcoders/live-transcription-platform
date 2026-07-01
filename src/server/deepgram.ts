@@ -2,6 +2,7 @@ import { createClient, LiveTranscriptionEvents } from "@deepgram/sdk";
 import type { LanguageCode } from "@/shared/languages";
 import { getDeepgramLanguage } from "@/shared/languages";
 import { getServerEnv } from "./env";
+import { debugInfo } from "./logger";
 
 export interface DeepgramTranscript {
   text: string;
@@ -46,7 +47,7 @@ export class DeepgramStream {
     const deepgram = createClient(env.DEEPGRAM_API_KEY);
     const language = getDeepgramLanguage(this.options.sourceLanguage);
 
-    console.info("[deepgram] websocket connecting", {
+    debugInfo("[deepgram] websocket connecting", {
       sessionId: this.options.sessionId,
       model: env.DEEPGRAM_MODEL,
       language,
@@ -65,7 +66,7 @@ export class DeepgramStream {
 
     this.connection.on(LiveTranscriptionEvents.Open, () => {
       this.isOpen = true;
-      console.info("[deepgram] websocket opened", {
+      debugInfo("[deepgram] websocket opened", {
         sessionId: this.options.sessionId,
         queuedAudioChunks: this.pendingAudio.length
       });
@@ -80,7 +81,7 @@ export class DeepgramStream {
       const text = typeof alternative?.transcript === "string" ? alternative.transcript.trim() : "";
       if (!text) return;
 
-      console.info("[deepgram] transcript received", {
+      debugInfo("[deepgram] transcript received", {
         sessionId: this.options.sessionId,
         isFinal: Boolean(event.is_final),
         confidence: typeof alternative?.confidence === "number" ? alternative.confidence : undefined,
@@ -105,7 +106,7 @@ export class DeepgramStream {
 
     this.connection.on(LiveTranscriptionEvents.Close, () => {
       this.isOpen = false;
-      console.info("[deepgram] websocket closed", {
+      debugInfo("[deepgram] websocket closed", {
         sessionId: this.options.sessionId
       });
       this.options.onClose();

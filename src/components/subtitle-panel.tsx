@@ -2,8 +2,8 @@
 
 import { Captions, Maximize2, Minimize2, Radio } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
+import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import { formatTime } from "@/lib/utils";
-import { getLanguageLabel } from "@/shared/languages";
 import type { ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
 import { cn } from "@/lib/utils";
 
@@ -39,7 +39,7 @@ export function SubtitlePanel({
   const liveSegment = pendingTranslation ?? interimSegment ?? segments.at(-1) ?? null;
   const recentSegments = segments.slice(-3);
   const isConnected = connectionState === "connected";
-  const translationPending = "Tarjima qilinmoqda\u2026";
+  const translationPending = copy.translationInProgress;
   const displayTranslation = lastDisplayedTranslation ?? lastFinalTranslation ?? null;
   const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
 
@@ -75,7 +75,7 @@ export function SubtitlePanel({
           </span>
           <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200">
             <Radio className="h-3.5 w-3.5" />
-            {session ? getLanguageLabel(session.sourceLanguage) : copy.noSession}
+            {session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : copy.noSession}
           </span>
           {onToggleFocus ? (
             <button
@@ -101,7 +101,7 @@ export function SubtitlePanel({
             <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium text-slate-400">
               <span>{formatTime(liveSegment.startedAt)}</span>
               <span className="h-1 w-1 rounded-full bg-slate-600" />
-              <span>{session ? getLanguageLabel(session.targetLanguage) : getLanguageLabel(liveSegment.targetLanguage)}</span>
+              <span>{session ? getLocalizedLanguageLabel(session.targetLanguage, copy) : getLocalizedLanguageLabel(liveSegment.targetLanguage, copy)}</span>
               {!liveSegment.isFinal ? (
                 <span className="rounded-full bg-amber-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-amber-100">
                   {copy.interim}

@@ -11,6 +11,7 @@ import type {
 import { sessionStore } from "./sessions";
 import { DeepgramStream } from "./deepgram";
 import { getServerEnv } from "./env";
+import { debugInfo } from "./logger";
 import { classifyTranslationError, normalizeTranscriptText, streamTranslateTranscript } from "./translator";
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -483,7 +484,7 @@ export function registerSocketHandlers(io: TranslationServer) {
         mimeType,
         onTranscript: (transcript) => {
           const deepgramReceivedAt = Date.now();
-          console.info("[socket] transcript received", {
+          debugInfo("[socket] transcript received", {
             sessionId,
             isFinal: transcript.isFinal,
             textLength: transcript.text.length,
@@ -525,7 +526,7 @@ export function registerSocketHandlers(io: TranslationServer) {
           if (session) io.to(roomName(sessionId)).emit("session:updated", { session });
         },
         onClose: () => {
-          console.info("[socket] deepgram stream closed", {
+          debugInfo("[socket] deepgram stream closed", {
             sessionId,
             audioStats: audioChunkStatsBySession.get(sessionId)
           });
@@ -569,7 +570,7 @@ export function registerSocketHandlers(io: TranslationServer) {
       audioChunkStatsBySession.set(sessionId, nextStats);
       clearNoAudioTimer(sessionId);
       if (nextStats.count <= 5 || nextStats.count % 50 === 0) {
-        console.info("[socket] audio chunk received", {
+        debugInfo("[socket] audio chunk received", {
           sessionId,
           count: nextStats.count,
           byteLength: audioBuffer.byteLength,

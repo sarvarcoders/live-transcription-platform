@@ -3,8 +3,8 @@
 import { RefreshCw, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { UiCopy } from "@/lib/i18n";
+import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import { formatTime } from "@/lib/utils";
-import { getLanguageLabel } from "@/shared/languages";
 import type { SessionSummary } from "@/shared/types";
 import { Button } from "./ui/button";
 
@@ -18,6 +18,13 @@ export function SessionDashboard({ activeSessionId, onJoinSession, copy }: Sessi
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const statusLabels: Record<SessionSummary["status"], string> = {
+    waiting: copy.statusWaiting,
+    live: copy.statusLive,
+    ended: copy.statusEnded,
+    error: copy.statusError,
+    expired: copy.statusExpired
+  };
 
   const loadSessions = useCallback(async () => {
     setIsLoading(true);
@@ -68,12 +75,12 @@ export function SessionDashboard({ activeSessionId, onJoinSession, copy }: Sessi
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-lg font-bold text-slate-950 dark:text-white">{session.code}</span>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                      {session.status}
+                      {statusLabels[session.status]}
                     </span>
                   </div>
                   <p className="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">{session.title}</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    {getLanguageLabel(session.sourceLanguage)} · {copy.updated}{" "}
+                    {getLocalizedLanguageLabel(session.sourceLanguage, copy)} · {copy.updated}{" "}
                     {formatTime(session.updatedAt)} · {copy.expires} {formatTime(session.expiresAt)}
                   </p>
                   <p className="mt-1 inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">

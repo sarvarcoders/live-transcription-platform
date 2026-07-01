@@ -5,18 +5,17 @@ import type { UiCopy } from "@/lib/i18n";
 import type { ConnectionState } from "@/shared/types";
 import { cn } from "@/lib/utils";
 
-const labels: Record<ConnectionState, string> = {
-  idle: "Idle",
-  connecting: "Connecting",
-  connected: "Connected",
-  reconnecting: "Reconnecting",
-  disconnected: "Disconnected",
-  error: "Error"
-};
-
 export function ConnectionStatus({ state, message, copy }: { state: ConnectionState; message?: string; copy?: UiCopy }) {
   const isLoading = state === "connecting" || state === "reconnecting";
   const isOnline = state === "connected";
+  const labels: Record<ConnectionState, string> = {
+    idle: copy?.connectionIdle ?? "Idle",
+    connecting: copy?.connectionConnecting ?? "Connecting",
+    connected: copy?.connectionConnected ?? "Connected",
+    reconnecting: copy?.connectionReconnecting ?? "Reconnecting",
+    disconnected: copy?.connectionDisconnected ?? "Disconnected",
+    error: copy?.connectionError ?? "Error"
+  };
 
   return (
     <div
@@ -30,7 +29,7 @@ export function ConnectionStatus({ state, message, copy }: { state: ConnectionSt
       title={message}
     >
       {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : isOnline ? <Radio className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-      {state === "connected" && copy ? copy.connected : labels[state]}
+      {labels[state]}
     </div>
   );
 }

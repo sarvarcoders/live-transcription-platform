@@ -2,8 +2,8 @@
 
 import { FileText } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
+import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import { formatTime } from "@/lib/utils";
-import { getLanguageLabel } from "@/shared/languages";
 import type { TranscriptSegment } from "@/shared/types";
 
 export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegment[]; copy: UiCopy }) {
@@ -30,7 +30,7 @@ export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegm
               <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span>#{index + 1}</span>
                 <span>{formatTime(segment.startedAt)}</span>
-                <span>{getLanguageLabel(segment.sourceLanguage)}</span>
+                <span>{getLocalizedLanguageLabel(segment.sourceLanguage, copy)}</span>
               </div>
               <p className="text-sm font-medium leading-6 text-slate-950 dark:text-slate-100">{segment.text}</p>
               {segment.translatedText ? (

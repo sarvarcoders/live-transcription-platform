@@ -11,7 +11,6 @@ import { type BroadcasterStatus, HostControls } from "./host-controls";
 import { PreferenceControls } from "./preference-controls";
 import { SubtitlePanel } from "./subtitle-panel";
 import { TranscriptHistory } from "./transcript-history";
-import { VoiceControls } from "./voice-controls";
 import { ViewerControls } from "./viewer-controls";
 
 type Mode = "broadcaster" | "viewer";
@@ -24,12 +23,12 @@ interface CreateSessionResponse {
   error?: string;
 }
 
-function parseCreateSessionResponse(payload: CreateSessionResponse) {
+function parseCreateSessionResponse(payload: CreateSessionResponse, invalidResponseMessage: string) {
   const sessionId = payload.session?.id;
   const broadcasterToken = payload.broadcasterToken;
 
   if (!sessionId || !broadcasterToken) {
-    throw new Error("Session was created without a valid session id or broadcaster token.");
+    throw new Error(invalidResponseMessage);
   }
 
   return { sessionId, broadcasterToken };
@@ -75,8 +74,8 @@ export function TranscriptionStudio() {
   });
 
   useEffect(() => {
-    const storedLocale = window.localStorage.getItem("tts-ui-locale");
-    const storedTheme = window.localStorage.getItem("tts-ui-theme");
+    const storedLocale = window.localStorage.getItem("live-ui-locale");
+    const storedTheme = window.localStorage.getItem("live-ui-theme");
     if (storedLocale === "en" || storedLocale === "uz") setLocale(storedLocale);
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme);
   }, []);
@@ -84,11 +83,11 @@ export function TranscriptionStudio() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     document.documentElement.style.colorScheme = theme;
-    window.localStorage.setItem("tts-ui-theme", theme);
+    window.localStorage.setItem("live-ui-theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem("tts-ui-locale", locale);
+    window.localStorage.setItem("live-ui-locale", locale);
   }, [locale]);
 
   useEffect(() => {
@@ -144,13 +143,13 @@ export function TranscriptionStudio() {
         error: payload.error
       });
       if (!response.ok) {
-        throw new Error(payload.error ?? "Could not create session.");
+        throw new Error(payload.error ?? copy.couldNotCreateSession);
       }
 
-      const { sessionId, broadcasterToken } = parseCreateSessionResponse(payload);
+      const { sessionId, broadcasterToken } = parseCreateSessionResponse(payload, copy.invalidCreateSessionResponse);
       live.hostSession(sessionId, broadcasterToken);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Could not create session.");
+      setFormError(error instanceof Error ? error.message : copy.couldNotCreateSession);
     } finally {
       setIsCreating(false);
     }
@@ -309,18 +308,6 @@ export function TranscriptionStudio() {
         </div>
 
         <aside className="order-3 grid content-start gap-3 lg:sticky lg:top-3">
-          <VoiceControls
-            isAvailable={live.isVoiceAvailable}
-            isConfigured={live.isVoiceConfigured}
-            isEnabled={live.isVoiceEnabled}
-            isPlaying={live.isVoicePlaying}
-            isPreparing={live.isVoicePreparing}
-            queueLength={live.voiceQueueLength}
-            error={live.voiceError}
-            copy={copy}
-            onToggle={live.setVoiceEnabled}
-            onStop={live.stopVoice}
-          />
           <ExportControls session={live.session} segments={live.segments} copy={copy} />
           <TranscriptHistory segments={live.segments} copy={copy} />
         </aside>
