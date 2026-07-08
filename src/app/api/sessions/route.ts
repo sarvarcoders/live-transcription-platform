@@ -7,7 +7,8 @@ import { logEnvDiagnostics } from "@/server/env";
 const createSessionSchema = z.object({
   title: z.string().max(80).optional(),
   sourceLanguage: z.string().refine(isLanguageCode, "Unsupported source language"),
-  targetLanguage: z.string().refine(isLanguageCode, "Unsupported target language").optional()
+  targetLanguage: z.string().refine(isLanguageCode, "Unsupported target language").optional(),
+  sttProvider: z.enum(["auto", "deepgram", "google", "openai"]).optional()
 });
 
 export async function GET() {

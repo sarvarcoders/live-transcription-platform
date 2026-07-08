@@ -2,6 +2,8 @@ import type { LanguageCode } from "./languages";
 
 export type SessionStatus = "waiting" | "live" | "ended" | "error" | "expired";
 export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
+export type SttProvider = "auto" | "deepgram" | "google" | "openai";
+export type ActiveSttProvider = Exclude<SttProvider, "auto">;
 
 export interface SessionSummary {
   id: string;
@@ -9,6 +11,8 @@ export interface SessionSummary {
   title: string;
   sourceLanguage: LanguageCode;
   targetLanguage: LanguageCode;
+  sttProvider: SttProvider;
+  activeSttProvider?: ActiveSttProvider;
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
@@ -23,6 +27,7 @@ export interface TranscriptSegment {
   translatedText?: string;
   sourceLanguage: LanguageCode;
   targetLanguage: LanguageCode;
+  sttProvider?: ActiveSttProvider;
   isFinal: boolean;
   translationStatus?: "pending" | "complete" | "error";
   confidence?: number;
@@ -52,6 +57,7 @@ export interface CreateSessionInput {
   title?: string;
   sourceLanguage: LanguageCode;
   targetLanguage?: LanguageCode;
+  sttProvider?: SttProvider;
 }
 
 export interface SocketErrorPayload {
@@ -75,6 +81,7 @@ export interface ServerToClientEvents {
   "session:updated": (payload: { session: SessionSummary }) => void;
   "transcript:update": (payload: { segment: TranscriptSegment }) => void;
   "connection:state": (payload: { state: ConnectionState; message?: string }) => void;
+  "stt:provider": (payload: { sessionId: string; provider: ActiveSttProvider; requestedProvider: SttProvider; message?: string }) => void;
   "server:error": (payload: SocketErrorPayload) => void;
 }
 

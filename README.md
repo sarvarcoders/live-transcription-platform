@@ -1,14 +1,16 @@
 # Live Transcription Studio
 
-Browser microphone capture, Deepgram real-time transcription, OpenAI translation, multi-screen live viewing, transcript history, and TXT/SRT export.
+Browser microphone capture, pluggable real-time STT, OpenAI translation, multi-screen live viewing, transcript history, and TXT/SRT export.
 
-Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates interim and final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
+Deepgram is the default speech-to-text provider. Google Cloud Speech-to-Text can be enabled as an optional provider/fallback, especially for Uzbek source speech. OpenAI `gpt-4o-mini` translates interim and final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
 
 ## Features
 
 - Browser microphone capture with `MediaRecorder`
 - Live audio streaming over Socket.io
+- Pluggable STT provider layer with Deepgram default, Google optional, and OpenAI STT scaffold
 - Deepgram streaming speech-to-text with interim and final transcripts
+- Optional Google Cloud Speech-to-Text provider for source speech
 - OpenAI `gpt-4o-mini` translation for interim and final transcript segments
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
@@ -28,8 +30,14 @@ Deepgram powers speech-to-text. OpenAI `gpt-4o-mini` translates interim and fina
 ```mermaid
 flowchart LR
   Browser["Browser<br/>MediaRecorder"] -->|"audio chunks<br/>Socket.io"| Server["Custom Node Server<br/>Next.js + Socket.io"]
-  Server -->|"stream audio"| Deepgram["Deepgram<br/>Streaming API"]
-  Deepgram -->|"interim/final transcripts"| Server
+  Server -->|"provider selection"| STT["STT Provider Layer<br/>Deepgram / Google / OpenAI"]
+  STT -->|"default"| Deepgram["Deepgram<br/>Streaming API"]
+  STT -->|"optional"| Google["Google Cloud<br/>Speech-to-Text"]
+  STT -->|"future"| OpenAISTT["OpenAI<br/>Realtime STT"]
+  Deepgram -->|"interim/final transcripts"| STT
+  Google -->|"interim/final transcripts"| STT
+  OpenAISTT -->|"interim/final transcripts"| STT
+  STT -->|"normalized transcripts"| Server
   Server -->|"interim/final transcript"| OpenAI["OpenAI<br/>gpt-4o-mini"]
   OpenAI -->|"translation"| Server
   Server -->|"original + translated subtitles"| Broadcaster["Broadcaster Screen"]
@@ -51,8 +59,20 @@ DEEPGRAM_API_KEY=your_deepgram_api_key
 OPENAI_API_KEY=your_openai_api_key
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 PORT=3000
+STT_PROVIDER=deepgram
+STT_AUTO_FALLBACK=true
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_ENDPOINTING_MS=60
+GOOGLE_STT_ENABLED=false
+GOOGLE_APPLICATION_CREDENTIALS=
+GOOGLE_STT_PROJECT_ID=
+GOOGLE_STT_LOCATION=global
+GOOGLE_STT_RECOGNIZER=_
+GOOGLE_STT_MODEL=chirp_3
+GOOGLE_STT_LANGUAGE_CODE=uz-UZ
+GOOGLE_STT_INTERIM_RESULTS=true
+OPENAI_STT_ENABLED=false
+OPENAI_STT_MODEL=gpt-realtime-whisper
 INTERIM_TRANSLATION_ENABLED=true
 INTERIM_TRANSLATION_MIN_CHARS=8
 INTERIM_TRANSLATION_MIN_INTERVAL_MS=350
@@ -71,8 +91,20 @@ Environment variable reference:
 - `OPENAI_API_KEY`: Optional but recommended. Enables OpenAI translation. If missing, Deepgram transcription still works and the UI shows `OpenAI translation is not configured`.
 - `NEXT_PUBLIC_APP_URL`: Required in production. Set to the public Railway or Render URL with protocol, for example `https://your-app.up.railway.app` or `https://your-app.onrender.com`. `your-app.up.railway.app` without `https://` is invalid. Comma-separated origins are supported if you need multiple allowed Socket.io origins.
 - `PORT`: Local development port. Railway and Render inject this automatically in production.
+- `STT_PROVIDER`: STT provider strategy: `deepgram`, `google`, `openai`, or `auto`. Default: `deepgram`.
+- `STT_AUTO_FALLBACK`: If `true`, provider failures can fall back to Deepgram when possible. Default: `true`.
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
+- `GOOGLE_STT_ENABLED`: Enables Google Cloud Speech-to-Text provider. Default: `false`.
+- `GOOGLE_APPLICATION_CREDENTIALS`: Server-side path to a Google service account JSON file. Never expose this to the browser.
+- `GOOGLE_STT_PROJECT_ID`: Google Cloud project id for Speech-to-Text.
+- `GOOGLE_STT_LOCATION`: Google STT location. Default: `global`.
+- `GOOGLE_STT_RECOGNIZER`: Google recognizer id for future v2 integrations. Default: `_`.
+- `GOOGLE_STT_MODEL`: Google STT model. Default: `chirp_3`. If your Google API rejects this with v1 streaming, use a supported model such as `latest_long`.
+- `GOOGLE_STT_LANGUAGE_CODE`: Uzbek Google language code. Default: `uz-UZ`; English and Russian map to `en-US` and `ru-RU`.
+- `GOOGLE_STT_INTERIM_RESULTS`: Enables Google interim transcript results. Default: `true`.
+- `OPENAI_STT_ENABLED`: Placeholder flag for future OpenAI realtime/audio STT. Default: `false`.
+- `OPENAI_STT_MODEL`: Future OpenAI STT model name. Default: `gpt-realtime-whisper`.
 - `INTERIM_TRANSLATION_ENABLED`: Enables speculative OpenAI translation for Deepgram interim transcripts. Default: `true`.
 - `INTERIM_TRANSLATION_MIN_CHARS`: Minimum stable interim transcript length before translation starts. Default: `8`.
 - `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `350`.
@@ -84,7 +116,30 @@ Environment variable reference:
 - `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
 - `RUNTIME_DEBUG_LOGS`: Set to `true` only when debugging high-frequency Deepgram/audio events in production. Default: `false`.
 
-Do not commit real API keys. `.env`, `.env.local`, and `.env*.local` are ignored by git.
+Do not commit real API keys or Google service account JSON files. `.env`, `.env.local`, `.env*.local`, `google-credentials*.json`, `google-service-account*.json`, `service-account*.json`, and `credentials*.json` are ignored by git.
+
+## STT Provider Selection
+
+- `STT_PROVIDER=deepgram`: Always use Deepgram.
+- `STT_PROVIDER=google`: Always use Google STT. Requires Google env variables and credentials.
+- `STT_PROVIDER=openai`: Uses the OpenAI STT scaffold. It is not the default and currently returns a clear not-implemented error.
+- `STT_PROVIDER=auto`: English and Russian use Deepgram. Uzbek uses Google if `GOOGLE_STT_ENABLED=true` and Google is configured; otherwise it falls back to Deepgram.
+
+The broadcaster UI also includes an advanced STT provider selector. The selected provider is stored per session, and the active provider is shown as a small `STT: ...` badge on the subtitle stage.
+
+## Google STT Setup
+
+1. Create or select a Google Cloud project.
+2. Enable Cloud Speech-to-Text API.
+3. Create a service account with Speech-to-Text permissions.
+4. Store the service account JSON securely. For Railway/Render, mount it as a secret file or provide a secure path through `GOOGLE_APPLICATION_CREDENTIALS`.
+5. Set:
+   - `GOOGLE_STT_ENABLED=true`
+   - `GOOGLE_APPLICATION_CREDENTIALS=/secure/path/google-service-account.json`
+   - `GOOGLE_STT_PROJECT_ID=your-project-id`
+   - `STT_PROVIDER=auto` or `STT_PROVIDER=google`
+
+The app starts normally without Google configuration as long as Deepgram remains the default provider.
 
 ## Getting Started
 
@@ -117,8 +172,20 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
    - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.up.railway.app`
+   - `STT_PROVIDER=deepgram`
+   - `STT_AUTO_FALLBACK=true`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
+   - `GOOGLE_STT_ENABLED=false`
+   - `GOOGLE_STT_PROJECT_ID=`
+   - `GOOGLE_APPLICATION_CREDENTIALS=`
+   - `GOOGLE_STT_LOCATION=global`
+   - `GOOGLE_STT_RECOGNIZER=_`
+   - `GOOGLE_STT_MODEL=chirp_3`
+   - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
+   - `GOOGLE_STT_INTERIM_RESULTS=true`
+   - `OPENAI_STT_ENABLED=false`
+   - `OPENAI_STT_MODEL=gpt-realtime-whisper`
    - `INTERIM_TRANSLATION_ENABLED=true`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
@@ -143,8 +210,20 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
    - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.onrender.com`
+   - `STT_PROVIDER=deepgram`
+   - `STT_AUTO_FALLBACK=true`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
+   - `GOOGLE_STT_ENABLED=false`
+   - `GOOGLE_STT_PROJECT_ID=`
+   - `GOOGLE_APPLICATION_CREDENTIALS=`
+   - `GOOGLE_STT_LOCATION=global`
+   - `GOOGLE_STT_RECOGNIZER=_`
+   - `GOOGLE_STT_MODEL=chirp_3`
+   - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
+   - `GOOGLE_STT_INTERIM_RESULTS=true`
+   - `OPENAI_STT_ENABLED=false`
+   - `OPENAI_STT_MODEL=gpt-realtime-whisper`
    - `INTERIM_TRANSLATION_ENABLED=true`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
@@ -178,13 +257,14 @@ Netlify is not recommended for this version because the app depends on a persist
 
 1. Enter a session title.
 2. Choose the speaker language.
-3. Create a session.
-4. Share the generated session code or copied link with viewers.
-5. Click **Start microphone**.
-6. Approve browser microphone access.
-7. Speak and watch Deepgram transcripts and OpenAI translations update live.
-8. Use **Export TXT** or **Export SRT** to download the current history.
-9. Click **Stop recording** when finished.
+3. Choose the STT provider, or keep **Auto**.
+4. Create a session.
+5. Share the generated session code or copied link with viewers.
+6. Click **Start microphone**.
+7. Approve browser microphone access.
+8. Speak and watch STT transcripts and OpenAI translations update live.
+9. Use **Export TXT** or **Export SRT** to download the current history.
+10. Click **Stop recording** when finished.
 
 ### Viewer
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Maximize2 } from "lucide-react";
 import { uiCopy, type UiLocale, type UiTheme } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
+import type { SttProvider } from "@/shared/types";
 import { useLiveTranscription } from "@/hooks/use-live-transcription";
 import { ConnectionStatus } from "./connection-status";
 import { ExportControls } from "./export-controls";
@@ -55,6 +56,7 @@ export function TranscriptionStudio() {
   const [theme, setTheme] = useState<UiTheme>("light");
   const [sourceLanguage, setSourceLanguage] = useState<LanguageCode>("en");
   const [targetLanguage, setTargetLanguage] = useState<LanguageCode>("uz");
+  const [sttProvider, setSttProvider] = useState<SttProvider>("auto");
   const [mode, setMode] = useState<Mode>("broadcaster");
   const [joinSessionId, setJoinSessionId] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -119,6 +121,7 @@ export function TranscriptionStudio() {
       title,
       sourceLanguage,
       targetLanguage,
+      sttProvider,
       currentSessionId: live.session?.id,
       connectionState: live.connectionState,
       hasBroadcasterToken: live.hasBroadcasterToken
@@ -131,7 +134,7 @@ export function TranscriptionStudio() {
       const response = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, sourceLanguage, targetLanguage })
+        body: JSON.stringify({ title, sourceLanguage, targetLanguage, sttProvider })
       });
 
       const payload = (await response.json()) as CreateSessionResponse;
@@ -161,10 +164,11 @@ export function TranscriptionStudio() {
       role: live.role,
       connectionState: live.connectionState,
       isRecording: live.isRecording,
-      hasBroadcasterToken: live.hasBroadcasterToken,
-      error: live.error
+          hasBroadcasterToken: live.hasBroadcasterToken,
+          error: live.error,
+          selectedSttProvider: live.selectedSttProvider
     });
-  }, [live.session, live.role, live.connectionState, live.isRecording, live.hasBroadcasterToken, live.error]);
+  }, [live.session, live.role, live.connectionState, live.isRecording, live.hasBroadcasterToken, live.error, live.selectedSttProvider]);
 
   function joinSession() {
     setFormError(null);
@@ -191,6 +195,7 @@ export function TranscriptionStudio() {
           isRecording={live.isRecording}
           connectionState={live.connectionState}
           session={live.session}
+          selectedSttProvider={live.selectedSttProvider}
           copy={copy}
           isFocusMode
           onToggleFocus={() => setFocusMode(false)}
@@ -256,6 +261,7 @@ export function TranscriptionStudio() {
               title={title}
               sourceLanguage={sourceLanguage}
               targetLanguage={targetLanguage}
+              sttProvider={sttProvider}
               session={live.session}
               isCreating={isCreating}
               isRecording={live.isRecording}
@@ -267,6 +273,7 @@ export function TranscriptionStudio() {
               onTitleChange={setTitle}
               onSourceLanguageChange={setSourceLanguage}
               onTargetLanguageChange={setTargetLanguage}
+              onSttProviderChange={setSttProvider}
               onCreateSession={createSession}
               onStartRecording={live.startRecording}
               onStopRecording={live.stopRecording}
@@ -302,6 +309,7 @@ export function TranscriptionStudio() {
             isRecording={live.isRecording}
             connectionState={live.connectionState}
             session={live.session}
+            selectedSttProvider={live.selectedSttProvider}
             copy={copy}
             onToggleFocus={() => setFocusMode(true)}
           />

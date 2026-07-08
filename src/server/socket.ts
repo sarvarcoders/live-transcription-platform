@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { Server, Socket } from "socket.io";
 import type {
+  ActiveSttProvider,
   ClientToServerEvents,
   InterServerEvents,
   LatencyMetrics,
   ServerToClientEvents,
   SocketData,
+  SttProvider,
   TranscriptSegment
 } from "@/shared/types";
 import { sessionStore } from "./sessions";
-import { DeepgramStream } from "./deepgram";
 import { getServerEnv } from "./env";
 import { debugInfo } from "./logger";
+import { canFallbackToDeepgram, classifySttError, createSttStream, selectSttProvider, type SttStream, type SttTranscript } from "./stt";
 import { classifyTranslationError, normalizeTranscriptText, streamTranslateTranscript } from "./translator";
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -25,7 +27,7 @@ type InterimTranslationState = {
   stabilityTimer?: NodeJS.Timeout;
 };
 
-const activeStreams = new Map<string, DeepgramStream>();
+const activeStreams = new Map<string, SttStream>();
 const audioChunkStatsBySession = new Map<string, { count: number; totalBytes: number; lastChunkAt?: number }>();
 const noAudioTimersBySession = new Map<string, NodeJS.Timeout>();
 const lastAudioTimingBySession = new Map<string, { capturedAt: number; sentAt: number; audioReceivedAt: number }>();
@@ -38,41 +40,6 @@ function roomName(sessionId: string) {
 
 function emitError(socket: TranslationSocket, code: string, message: string) {
   socket.emit("server:error", { code, message });
-}
-
-function classifyDeepgramError(error: Error) {
-  const message = error.message.toLowerCase();
-  if (
-    message.includes("401") ||
-    message.includes("403") ||
-    message.includes("unauthorized") ||
-    message.includes("forbidden") ||
-    message.includes("api key") ||
-    message.includes("auth")
-  ) {
-    return {
-      code: "DEEPGRAM_AUTH_FAILED",
-      message: "Deepgram API key is invalid or unauthorized"
-    };
-  }
-
-  if (
-    message.includes("400") ||
-    message.includes("model") ||
-    message.includes("language") ||
-    message.includes("unsupported") ||
-    message.includes("invalid")
-  ) {
-    return {
-      code: "DEEPGRAM_CONFIG_FAILED",
-      message: "Deepgram model or language configuration failed"
-    };
-  }
-
-  return {
-    code: "DEEPGRAM_STREAM_ERROR",
-    message: `Deepgram connection failed: ${error.message}`
-  };
 }
 
 function toAudioBuffer(audio: ArrayBuffer | Buffer | Uint8Array) {
@@ -412,6 +379,25 @@ function scheduleFinalTranslation(io: TranslationServer, sessionId: string, segm
   finalTranslationTimersBySession.set(sessionId, timers);
 }
 
+function getProviderLabel(provider: ActiveSttProvider) {
+  if (provider === "google") return "Google";
+  if (provider === "openai") return "OpenAI";
+  return "Deepgram";
+}
+
+function publishSttProvider(
+  io: TranslationServer,
+  sessionId: string,
+  provider: ActiveSttProvider,
+  requestedProvider: SttProvider,
+  message?: string
+) {
+  const session = sessionStore.setActiveSttProvider(sessionId, provider);
+  const payload = { sessionId, provider, requestedProvider, message };
+  io.to(roomName(sessionId)).emit("stt:provider", payload);
+  if (session) io.to(roomName(sessionId)).emit("session:updated", { session });
+}
+
 export function registerSocketHandlers(io: TranslationServer) {
   io.on("connection", (socket) => {
     console.info("[socket] connected", { socketId: socket.id });
@@ -478,65 +464,119 @@ export function registerSocketHandlers(io: TranslationServer) {
       activeStreams.get(sessionId)?.stop();
       resetAudioState(sessionId);
 
-      const stream = new DeepgramStream({
-        sessionId,
-        sourceLanguage: liveSession.sourceLanguage,
-        mimeType,
-        onTranscript: (transcript) => {
-          const deepgramReceivedAt = Date.now();
-          debugInfo("[socket] transcript received", {
-            sessionId,
-            isFinal: transcript.isFinal,
-            textLength: transcript.text.length,
-            confidence: transcript.confidence
-          });
+      const requestedProvider = liveSession.sttProvider ?? getServerEnv().STT_PROVIDER;
+      const selection = selectSttProvider(liveSession.sourceLanguage, requestedProvider);
+      let fallbackUsed = false;
 
-          const segment: TranscriptSegment = {
-            id: transcript.isFinal ? randomUUID() : `interim:${sessionId}`,
-            sessionId,
-            text: transcript.text,
-            sourceLanguage: liveSession.sourceLanguage,
-            targetLanguage: liveSession.targetLanguage,
-            isFinal: transcript.isFinal,
-            translationStatus: transcript.isFinal ? "pending" : undefined,
-            confidence: transcript.confidence,
-            startedAt: new Date().toISOString(),
-            completedAt: transcript.isFinal ? new Date().toISOString() : undefined,
-            metrics: baseMetrics(sessionId, deepgramReceivedAt)
-          };
+      const handleTranscript = (transcript: SttTranscript) => {
+        const sttReceivedAt = Date.now();
+        debugInfo("[socket] stt transcript received", {
+          sessionId,
+          provider: transcript.provider,
+          isFinal: transcript.isFinal,
+          textLength: transcript.text.length,
+          confidence: transcript.confidence
+        });
 
-          if (transcript.isFinal) {
-            sessionStore.addTranscript(sessionId, segment);
-            scheduleFinalTranslation(io, sessionId, segment);
-          } else {
-            scheduleInterimTranslation(io, sessionId, segment);
-          }
+        const segment: TranscriptSegment = {
+          id: transcript.isFinal ? randomUUID() : `interim:${sessionId}`,
+          sessionId,
+          text: transcript.text,
+          sourceLanguage: liveSession.sourceLanguage,
+          targetLanguage: liveSession.targetLanguage,
+          isFinal: transcript.isFinal,
+          sttProvider: transcript.provider,
+          translationStatus: transcript.isFinal ? "pending" : undefined,
+          confidence: transcript.confidence,
+          startedAt: new Date().toISOString(),
+          completedAt: transcript.isFinal ? new Date().toISOString() : undefined,
+          metrics: baseMetrics(sessionId, sttReceivedAt)
+        };
 
-          emitSegment(io, sessionId, segment);
-        },
-        onError: (error) => {
-          const session = sessionStore.markError(sessionId);
-          const classifiedError = classifyDeepgramError(error);
-          activeStreams.get(sessionId)?.stop();
-          resetAudioState(sessionId);
-          io.to(roomName(sessionId)).emit("server:error", {
-            code: classifiedError.code,
-            message: classifiedError.message
-          });
-          if (session) io.to(roomName(sessionId)).emit("session:updated", { session });
-        },
-        onClose: () => {
-          debugInfo("[socket] deepgram stream closed", {
+        if (transcript.isFinal) {
+          console.info("[stt] final transcript received", {
             sessionId,
-            audioStats: audioChunkStatsBySession.get(sessionId)
+            provider: transcript.provider,
+            textLength: transcript.text.length
           });
-          activeStreams.delete(sessionId);
+          sessionStore.addTranscript(sessionId, segment);
+          scheduleFinalTranslation(io, sessionId, segment);
+        } else {
+          debugInfo("[stt] interim transcript received", {
+            sessionId,
+            provider: transcript.provider,
+            textLength: transcript.text.length
+          });
+          scheduleInterimTranslation(io, sessionId, segment);
         }
-      });
 
-      try {
+        emitSegment(io, sessionId, segment);
+      };
+
+      const startProviderStream = (provider: ActiveSttProvider, message?: string) => {
+        const stream = createSttStream(provider, {
+          sessionId,
+          sourceLanguage: liveSession.sourceLanguage,
+          mimeType,
+          onTranscript: handleTranscript,
+          onError: (error) => {
+            const classifiedError = classifySttError(provider, error);
+            console.warn("[stt] provider error", {
+              sessionId,
+              provider,
+              code: classifiedError.code,
+              message: classifiedError.message
+            });
+
+            if (canFallbackToDeepgram(provider) && !fallbackUsed) {
+              fallbackUsed = true;
+              activeStreams.get(sessionId)?.stop();
+              activeStreams.delete(sessionId);
+              try {
+                startProviderStream("deepgram", "STT provider switched to Deepgram");
+                socket.emit("connection:state", { state: "connected", message: "STT provider switched to Deepgram" });
+                return;
+              } catch (fallbackError) {
+                const fallbackClassification = classifySttError("deepgram", fallbackError);
+                io.to(roomName(sessionId)).emit("server:error", {
+                  code: fallbackClassification.code,
+                  message: fallbackClassification.message
+                });
+              }
+            }
+
+            const session = sessionStore.markError(sessionId);
+            activeStreams.get(sessionId)?.stop();
+            resetAudioState(sessionId);
+            io.to(roomName(sessionId)).emit("server:error", {
+              code: classifiedError.code,
+              message: classifiedError.message
+            });
+            if (session) io.to(roomName(sessionId)).emit("session:updated", { session });
+          },
+          onClose: () => {
+            debugInfo("[socket] stt stream closed", {
+              sessionId,
+              provider,
+              audioStats: audioChunkStatsBySession.get(sessionId)
+            });
+            activeStreams.delete(sessionId);
+          }
+        });
+
         stream.start();
         activeStreams.set(sessionId, stream);
+        publishSttProvider(io, sessionId, provider, selection.requestedProvider, message);
+        console.info("[stt] selected provider", {
+          sessionId,
+          requestedProvider: selection.requestedProvider,
+          provider,
+          sourceLanguage: liveSession.sourceLanguage,
+          fallbackReason: message ?? selection.fallbackReason
+        });
+      };
+
+      const startAudioMonitoring = () => {
         audioChunkStatsBySession.set(sessionId, { count: 0, totalBytes: 0 });
         clearNoAudioTimer(sessionId);
         noAudioTimersBySession.set(
@@ -549,10 +589,27 @@ export function registerSocketHandlers(io: TranslationServer) {
             }
           }, 3000)
         );
-        socket.emit("connection:state", { state: "connected", message: "Deepgram stream started." });
+      };
+
+      try {
+        startProviderStream(selection.provider, selection.fallbackReason);
+        startAudioMonitoring();
+        socket.emit("connection:state", { state: "connected", message: `${getProviderLabel(selection.provider)} STT stream started.` });
       } catch (error) {
-        const normalizedError = error instanceof Error ? error : new Error("Could not start transcription stream.");
-        const classifiedError = classifyDeepgramError(normalizedError);
+        const classifiedError = classifySttError(selection.provider, error);
+        if (canFallbackToDeepgram(selection.provider)) {
+          try {
+            fallbackUsed = true;
+            startProviderStream("deepgram", "STT provider switched to Deepgram");
+            startAudioMonitoring();
+            socket.emit("connection:state", { state: "connected", message: "STT provider switched to Deepgram" });
+            return;
+          } catch (fallbackError) {
+            const fallbackClassification = classifySttError("deepgram", fallbackError);
+            emitError(socket, fallbackClassification.code, fallbackClassification.message);
+            return;
+          }
+        }
         emitError(socket, classifiedError.code, classifiedError.message);
       }
     });

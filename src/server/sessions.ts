@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { LanguageCode } from "@/shared/languages";
-import type { CreateSessionInput, SessionRole, SessionStatus, SessionSummary, TranscriptSegment } from "@/shared/types";
+import type { ActiveSttProvider, CreateSessionInput, SessionRole, SessionStatus, SessionSummary, TranscriptSegment } from "@/shared/types";
 
 interface ViewerParticipant {
   token: string;
@@ -15,6 +15,8 @@ interface LiveSession {
   title: string;
   sourceLanguage: CreateSessionInput["sourceLanguage"];
   targetLanguage: LanguageCode;
+  sttProvider: CreateSessionInput["sttProvider"];
+  activeSttProvider?: ActiveSttProvider;
   status: SessionStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -76,6 +78,8 @@ function toSummary(session: LiveSession): SessionSummary {
     title: session.title,
     sourceLanguage: session.sourceLanguage,
     targetLanguage: session.targetLanguage,
+    sttProvider: session.sttProvider ?? "auto",
+    activeSttProvider: session.activeSttProvider,
     status: session.status,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
@@ -114,7 +118,8 @@ export const sessionStore = {
     console.info("[session] create requested", {
       title: input.title,
       sourceLanguage: input.sourceLanguage,
-      targetLanguage: input.targetLanguage
+      targetLanguage: input.targetLanguage,
+      sttProvider: input.sttProvider ?? "auto"
     });
     const now = new Date();
     const code = createSessionCode();
@@ -124,6 +129,8 @@ export const sessionStore = {
       title: input.title?.trim() || "Live Transcription Session",
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage ?? input.sourceLanguage,
+      sttProvider: input.sttProvider ?? "auto",
+      activeSttProvider: undefined,
       status: "waiting",
       createdAt: now,
       updatedAt: now,
@@ -285,6 +292,14 @@ export const sessionStore = {
     const session = getSession(sessionId);
     if (!session || isExpired(session)) return null;
     session.status = "error";
+    touch(session);
+    return toSummary(session);
+  },
+
+  setActiveSttProvider(sessionId: string, provider: ActiveSttProvider) {
+    const session = getSession(sessionId);
+    if (!session || isExpired(session)) return null;
+    session.activeSttProvider = provider;
     touch(session);
     return toSummary(session);
   },

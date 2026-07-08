@@ -7,6 +7,7 @@ import type {
   ConnectionState,
   ServerToClientEvents,
   SessionSummary,
+  ActiveSttProvider,
   TranscriptSegment,
   LatencyMetrics
 } from "@/shared/types";
@@ -30,6 +31,23 @@ const TRANSLATION_ERROR_CODES = new Set([
   "OPENAI_AUTH_INVALID",
   "OPENAI_QUOTA_EXCEEDED",
   "OPENAI_TRANSLATION_FAILED"
+]);
+const STT_ERROR_CODES = new Set([
+  "DEEPGRAM_AUTH_FAILED",
+  "DEEPGRAM_CONFIG_FAILED",
+  "DEEPGRAM_STREAM_ERROR",
+  "DEEPGRAM_START_FAILED",
+  "GOOGLE_STT_NOT_CONFIGURED",
+  "GOOGLE_STT_CREDENTIALS_MISSING",
+  "GOOGLE_STT_CONNECTION_FAILED",
+  "GOOGLE_STT_CONFIG_FAILED",
+  "GOOGLE_STT_QUOTA_EXCEEDED",
+  "GOOGLE_STT_PERMISSION_DENIED",
+  "OPENAI_STT_NOT_CONFIGURED",
+  "OPENAI_STT_CREDENTIALS_MISSING",
+  "OPENAI_STT_NOT_IMPLEMENTED",
+  "OPENAI_STT_FAILED",
+  "NO_AUDIO_CHUNKS"
 ]);
 
 function getRecorderMimeType() {
@@ -82,6 +100,7 @@ export function useLiveTranscription() {
   const [isRecording, setIsRecording] = useState(false);
   const [role, setRole] = useState<LiveRole | null>(null);
   const [hasBroadcasterToken, setHasBroadcasterToken] = useState(false);
+  const [selectedSttProvider, setSelectedSttProvider] = useState<ActiveSttProvider | null>(null);
   const latestAcceptedTranslationStartedAtRef = useRef(0);
   const latestSeenTranscriptStartedAtRef = useRef(0);
   const lastDisplayedTranslationRef = useRef<string | null>(null);
@@ -179,8 +198,9 @@ export function useLiveTranscription() {
     resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
-    setHasBroadcasterToken(false);
-    setIsRecording(false);
+      setHasBroadcasterToken(false);
+      setSelectedSttProvider(null);
+      setIsRecording(false);
     if (message) setError(message);
   }, [resetTranslationDisplay, stopLocalRecording]);
 
@@ -247,6 +267,7 @@ export function useLiveTranscription() {
       credentialsRef.current = credentials;
       window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(credentials));
       setSession(readySession);
+      setSelectedSttProvider(readySession.activeSttProvider ?? null);
       setRole(liveRole);
       setHasBroadcasterToken(liveRole === "broadcaster" && Boolean(reconnectToken));
       setError(null);
@@ -260,9 +281,26 @@ export function useLiveTranscription() {
 
     socket.on("session:updated", ({ session: updatedSession }) => {
       setSession(updatedSession);
+      if (updatedSession.activeSttProvider) setSelectedSttProvider(updatedSession.activeSttProvider);
+    });
+
+    socket.on("stt:provider", ({ provider, requestedProvider, message }) => {
+      console.info("[frontend] selected STT provider received", {
+        provider,
+        requestedProvider,
+        message
+      });
+      setSelectedSttProvider(provider);
+      if (message) setConnectionMessage(message);
     });
 
     socket.on("transcript:update", ({ segment }) => {
+      console.info("[frontend] transcript update received", {
+        segmentId: segment.id,
+        isFinal: segment.isFinal,
+        sttProvider: segment.sttProvider,
+        hasTranslation: Boolean(segment.translatedText)
+      });
       const clientReceivedAt = Date.now();
       const metrics: LatencyMetrics = {
         ...segment.metrics,
@@ -284,6 +322,11 @@ export function useLiveTranscription() {
           setIsTranslationPending(false);
         }
       } else if (measuredSegment.translatedText) {
+        console.info("[frontend] translation update received", {
+          segmentId: measuredSegment.id,
+          isFinal: measuredSegment.isFinal,
+          translationStatus: measuredSegment.translationStatus
+        });
         if (isLatestTranscriptUpdate && translationStartedAt >= latestAcceptedTranslationStartedAtRef.current) {
           latestAcceptedTranslationStartedAtRef.current = translationStartedAt;
           queueDisplayedTranslation(measuredSegment);
@@ -323,13 +366,7 @@ export function useLiveTranscription() {
         setConnectionMessage(message);
       } else {
         setError(message);
-        if (
-          code === "DEEPGRAM_AUTH_FAILED" ||
-          code === "DEEPGRAM_CONFIG_FAILED" ||
-          code === "DEEPGRAM_STREAM_ERROR" ||
-          code === "DEEPGRAM_START_FAILED" ||
-          code === "NO_AUDIO_CHUNKS"
-        ) {
+        if (STT_ERROR_CODES.has(code)) {
           stopLocalRecording();
         }
         console.error("[frontend] connectionState -> error", {
@@ -544,7 +581,8 @@ export function useLiveTranscription() {
     resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
-    setHasBroadcasterToken(false);
+      setHasBroadcasterToken(false);
+      setSelectedSttProvider(null);
     credentialsRef.current = null;
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setConnectionState("idle");
@@ -594,6 +632,7 @@ export function useLiveTranscription() {
       isRecording,
       role,
       hasBroadcasterToken,
+      selectedSttProvider,
       hostSession,
       joinSession,
       startRecording,
@@ -618,6 +657,7 @@ export function useLiveTranscription() {
       isRecording,
       role,
       hasBroadcasterToken,
+      selectedSttProvider,
       hostSession,
       joinSession,
       startRecording,

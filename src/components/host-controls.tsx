@@ -1,9 +1,9 @@
 "use client";
 
-import { Mic, Radio, Square } from "lucide-react";
+import { ChevronDown, Cpu, Mic, Radio, Square } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
-import type { ConnectionState, SessionSummary } from "@/shared/types";
+import type { ConnectionState, SessionSummary, SttProvider } from "@/shared/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { LanguageSelect } from "./language-select";
@@ -15,6 +15,7 @@ interface HostControlsProps {
   title: string;
   sourceLanguage: LanguageCode;
   targetLanguage: LanguageCode;
+  sttProvider: SttProvider;
   session: SessionSummary | null;
   isCreating: boolean;
   isRecording: boolean;
@@ -26,6 +27,7 @@ interface HostControlsProps {
   onTitleChange: (title: string) => void;
   onSourceLanguageChange: (language: LanguageCode) => void;
   onTargetLanguageChange: (language: LanguageCode) => void;
+  onSttProviderChange: (provider: SttProvider) => void;
   onCreateSession: () => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
@@ -36,6 +38,7 @@ export function HostControls({
   title,
   sourceLanguage,
   targetLanguage,
+  sttProvider,
   session,
   isCreating,
   isRecording,
@@ -47,6 +50,7 @@ export function HostControls({
   onTitleChange,
   onSourceLanguageChange,
   onTargetLanguageChange,
+  onSttProviderChange,
   onCreateSession,
   onStartRecording,
   onStopRecording,
@@ -120,6 +124,26 @@ export function HostControls({
         disabled={hasSession}
         onChange={onTargetLanguageChange}
       />
+
+      <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="stt-provider">
+        {copy.sttProvider}
+        <span className="relative block">
+          <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-600 dark:text-cyan-300" />
+          <select
+            id="stt-provider"
+            value={sttProvider}
+            disabled={hasSession}
+            onChange={(event) => onSttProviderChange(event.target.value as SttProvider)}
+            className="w-full appearance-none rounded-xl border border-slate-200/80 bg-white/90 py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 shadow-sm outline-none transition hover:border-brand-200 hover:bg-white focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-100 dark:hover:border-cyan-700 dark:focus:ring-brand-500/20 dark:disabled:bg-slate-900"
+          >
+            <option value="auto">{copy.sttAuto}</option>
+            <option value="deepgram">{copy.sttDeepgram}</option>
+            <option value="google">{copy.sttGoogle}</option>
+            <option value="openai">{copy.sttOpenai}</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        </span>
+      </label>
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}
 

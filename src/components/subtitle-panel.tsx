@@ -4,7 +4,7 @@ import { Captions, Maximize2, Minimize2, Radio } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import { formatTime } from "@/lib/utils";
-import type { ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
+import type { ActiveSttProvider, ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
 import { cn } from "@/lib/utils";
 
 interface SubtitlePanelProps {
@@ -17,6 +17,7 @@ interface SubtitlePanelProps {
   isRecording: boolean;
   connectionState: ConnectionState;
   session: SessionSummary | null;
+  selectedSttProvider?: ActiveSttProvider | null;
   copy: UiCopy;
   isFocusMode?: boolean;
   onToggleFocus?: () => void;
@@ -32,6 +33,7 @@ export function SubtitlePanel({
   isRecording,
   connectionState,
   session,
+  selectedSttProvider,
   copy,
   isFocusMode,
   onToggleFocus
@@ -42,6 +44,14 @@ export function SubtitlePanel({
   const translationPending = copy.translationInProgress;
   const displayTranslation = lastDisplayedTranslation ?? lastFinalTranslation ?? null;
   const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
+  const activeProvider = selectedSttProvider ?? session?.activeSttProvider;
+  const providerLabel = activeProvider
+    ? activeProvider === "google"
+      ? copy.sttGoogle
+      : activeProvider === "openai"
+        ? copy.sttOpenai
+        : copy.sttDeepgram
+    : null;
 
   return (
     <section
@@ -77,6 +87,11 @@ export function SubtitlePanel({
             <Radio className="h-3.5 w-3.5" />
             {session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : copy.noSession}
           </span>
+          {providerLabel ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
+              STT: {providerLabel}
+            </span>
+          ) : null}
           {onToggleFocus ? (
             <button
               type="button"
