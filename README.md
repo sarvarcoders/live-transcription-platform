@@ -65,6 +65,7 @@ DEEPGRAM_MODEL=nova-3
 DEEPGRAM_ENDPOINTING_MS=60
 GOOGLE_STT_ENABLED=false
 GOOGLE_APPLICATION_CREDENTIALS=
+GOOGLE_STT_CREDENTIALS_JSON=
 GOOGLE_STT_PROJECT_ID=
 GOOGLE_STT_LOCATION=global
 GOOGLE_STT_RECOGNIZER=_
@@ -96,7 +97,8 @@ Environment variable reference:
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
 - `GOOGLE_STT_ENABLED`: Enables Google Cloud Speech-to-Text provider. Default: `false`.
-- `GOOGLE_APPLICATION_CREDENTIALS`: Server-side path to a Google service account JSON file. Never expose this to the browser.
+- `GOOGLE_APPLICATION_CREDENTIALS`: Server-side path to a Google service account JSON file. Useful locally or when your host supports secret files.
+- `GOOGLE_STT_CREDENTIALS_JSON`: Full Google service account JSON stored as a Railway/Render secret env var. This is read server-side only and is never exposed or logged.
 - `GOOGLE_STT_PROJECT_ID`: Google Cloud project id for Speech-to-Text.
 - `GOOGLE_STT_LOCATION`: Google STT location. Default: `global`.
 - `GOOGLE_STT_RECOGNIZER`: Google recognizer id for future v2 integrations. Default: `_`.
@@ -132,12 +134,14 @@ The broadcaster UI also includes an advanced STT provider selector. The selected
 1. Create or select a Google Cloud project.
 2. Enable Cloud Speech-to-Text API.
 3. Create a service account with Speech-to-Text permissions.
-4. Store the service account JSON securely. For Railway/Render, mount it as a secret file or provide a secure path through `GOOGLE_APPLICATION_CREDENTIALS`.
+4. Store the service account JSON securely. On Railway, prefer `GOOGLE_STT_CREDENTIALS_JSON` as a secret env var. If your host supports secret files, `GOOGLE_APPLICATION_CREDENTIALS` can point to the mounted JSON file instead.
 5. Set:
    - `GOOGLE_STT_ENABLED=true`
-   - `GOOGLE_APPLICATION_CREDENTIALS=/secure/path/google-service-account.json`
+   - `GOOGLE_STT_CREDENTIALS_JSON={...full service account json...}`
    - `GOOGLE_STT_PROJECT_ID=your-project-id`
    - `STT_PROVIDER=auto` or `STT_PROVIDER=google`
+
+Never commit the service account JSON. Do not prefix it with `NEXT_PUBLIC_`; it must remain server-side only.
 
 The app starts normally without Google configuration as long as Deepgram remains the default provider.
 
@@ -179,6 +183,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_ENABLED=false`
    - `GOOGLE_STT_PROJECT_ID=`
    - `GOOGLE_APPLICATION_CREDENTIALS=`
+   - `GOOGLE_STT_CREDENTIALS_JSON=`
    - `GOOGLE_STT_LOCATION=global`
    - `GOOGLE_STT_RECOGNIZER=_`
    - `GOOGLE_STT_MODEL=chirp_3`
@@ -217,6 +222,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_ENABLED=false`
    - `GOOGLE_STT_PROJECT_ID=`
    - `GOOGLE_APPLICATION_CREDENTIALS=`
+   - `GOOGLE_STT_CREDENTIALS_JSON=`
    - `GOOGLE_STT_LOCATION=global`
    - `GOOGLE_STT_RECOGNIZER=_`
    - `GOOGLE_STT_MODEL=chirp_3`

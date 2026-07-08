@@ -26,6 +26,12 @@ interface GoogleRecognizeStream {
   destroy?: () => void;
 }
 
+interface GoogleCredentialsJson {
+  client_email?: string;
+  private_key?: string;
+  project_id?: string;
+}
+
 function getGoogleLanguageCode(sourceLanguage: LanguageCode) {
   const env = getServerEnv();
   if (sourceLanguage === "uz") return env.GOOGLE_STT_LANGUAGE_CODE || "uz-UZ";
@@ -41,7 +47,40 @@ function getAudioEncoding(mimeType: string) {
 
 export function isGoogleSttConfigured() {
   const env = getServerEnv();
-  return Boolean(env.GOOGLE_STT_ENABLED && (env.GOOGLE_APPLICATION_CREDENTIALS || env.GOOGLE_STT_PROJECT_ID));
+  return Boolean(
+    env.GOOGLE_STT_ENABLED &&
+      (env.GOOGLE_STT_CREDENTIALS_JSON || env.GOOGLE_APPLICATION_CREDENTIALS || env.GOOGLE_STT_PROJECT_ID)
+  );
+}
+
+function parseGoogleCredentialsJson(value: string): GoogleCredentialsJson {
+  try {
+    const parsed = JSON.parse(value.trim()) as GoogleCredentialsJson;
+    if (!parsed.client_email || !parsed.private_key) {
+      throw new Error("missing required fields");
+    }
+    return parsed;
+  } catch {
+    throw new SttProviderError("google", "GOOGLE_STT_CREDENTIALS_INVALID", "Google credentials JSON is invalid");
+  }
+}
+
+function getGoogleClientOptions() {
+  const env = getServerEnv();
+  if (!env.GOOGLE_STT_CREDENTIALS_JSON) {
+    return {
+      projectId: env.GOOGLE_STT_PROJECT_ID || undefined
+    };
+  }
+
+  const credentials = parseGoogleCredentialsJson(env.GOOGLE_STT_CREDENTIALS_JSON);
+  return {
+    projectId: env.GOOGLE_STT_PROJECT_ID || credentials.project_id || undefined,
+    credentials: {
+      client_email: credentials.client_email,
+      private_key: credentials.private_key
+    }
+  };
 }
 
 export class GoogleSttStream implements SttStream {
@@ -58,14 +97,12 @@ export class GoogleSttStream implements SttStream {
       throw new SttProviderError(this.provider, "GOOGLE_STT_NOT_CONFIGURED", "Google STT is not configured");
     }
 
-    if (!env.GOOGLE_APPLICATION_CREDENTIALS && !env.GOOGLE_STT_PROJECT_ID) {
+    if (!env.GOOGLE_STT_CREDENTIALS_JSON && !env.GOOGLE_APPLICATION_CREDENTIALS && !env.GOOGLE_STT_PROJECT_ID) {
       throw new SttProviderError(this.provider, "GOOGLE_STT_CREDENTIALS_MISSING", "Google credentials are missing");
     }
 
     const languageCode = getGoogleLanguageCode(this.options.sourceLanguage);
-    const client = new SpeechClient({
-      projectId: env.GOOGLE_STT_PROJECT_ID || undefined
-    });
+    const client = new SpeechClient(getGoogleClientOptions());
 
     debugInfo("[stt:google] stream connecting", {
       sessionId: this.options.sessionId,

@@ -24,6 +24,7 @@ const envSchema = z.object({
   DEEPGRAM_ENDPOINTING_MS: z.coerce.number().int().min(10).max(1000).default(60),
   GOOGLE_STT_ENABLED: booleanFromEnv.default(false),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),
+  GOOGLE_STT_CREDENTIALS_JSON: z.string().optional(),
   GOOGLE_STT_PROJECT_ID: z.string().optional(),
   GOOGLE_STT_LOCATION: z.string().min(1).default("global"),
   GOOGLE_STT_RECOGNIZER: z.string().min(1).default("_"),
@@ -88,9 +89,13 @@ export function getEnvDiagnostics() {
     deepgramModel: process.env.DEEPGRAM_MODEL ?? "nova-3",
     deepgramEndpointingMs: process.env.DEEPGRAM_ENDPOINTING_MS ?? 60,
     googleSttEnabled: process.env.GOOGLE_STT_ENABLED ?? false,
-    googleSttConfigured: Boolean(process.env.GOOGLE_STT_ENABLED === "true" && (process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_STT_PROJECT_ID)),
+    googleSttConfigured: Boolean(
+      process.env.GOOGLE_STT_ENABLED === "true" &&
+        (process.env.GOOGLE_STT_CREDENTIALS_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_STT_PROJECT_ID)
+    ),
     googleSttProjectIdPresent: Boolean(process.env.GOOGLE_STT_PROJECT_ID),
     googleSttCredentialsPresent: Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS),
+    googleSttCredentialsJsonPresent: Boolean(process.env.GOOGLE_STT_CREDENTIALS_JSON),
     googleSttLocation: process.env.GOOGLE_STT_LOCATION ?? "global",
     googleSttRecognizer: process.env.GOOGLE_STT_RECOGNIZER ?? "_",
     googleSttModel: process.env.GOOGLE_STT_MODEL ?? "chirp_3",
@@ -128,6 +133,7 @@ export function logEnvDiagnostics(context: string) {
     googleSttConfigured: diagnostics.googleSttConfigured,
     googleSttProjectIdPresent: diagnostics.googleSttProjectIdPresent,
     googleSttCredentialsPresent: diagnostics.googleSttCredentialsPresent,
+    googleSttCredentialsJsonPresent: diagnostics.googleSttCredentialsJsonPresent,
     googleSttLocation: diagnostics.googleSttLocation,
     googleSttRecognizer: diagnostics.googleSttRecognizer,
     googleSttModel: diagnostics.googleSttModel,
@@ -164,6 +170,7 @@ export function getServerEnv(): ServerEnv {
     DEEPGRAM_ENDPOINTING_MS: process.env.DEEPGRAM_ENDPOINTING_MS ?? 60,
     GOOGLE_STT_ENABLED: process.env.GOOGLE_STT_ENABLED ?? false,
     GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    GOOGLE_STT_CREDENTIALS_JSON: process.env.GOOGLE_STT_CREDENTIALS_JSON,
     GOOGLE_STT_PROJECT_ID: process.env.GOOGLE_STT_PROJECT_ID,
     GOOGLE_STT_LOCATION: process.env.GOOGLE_STT_LOCATION ?? "global",
     GOOGLE_STT_RECOGNIZER: process.env.GOOGLE_STT_RECOGNIZER ?? "_",
