@@ -3,6 +3,7 @@ import { getDeepgramLanguage } from "@/shared/languages";
 import { getServerEnv } from "@/server/env";
 import { debugInfo } from "@/server/logger";
 import type { SttStream, SttStreamOptions } from "./types";
+import { SttProviderError } from "./types";
 
 interface DeepgramLiveConnection {
   on(event: string, listener: (...args: unknown[]) => void): void;
@@ -20,6 +21,17 @@ interface DeepgramTranscriptEvent {
   is_final?: unknown;
 }
 
+function isDeepgramConfigError(error: Error) {
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("400") ||
+    message.includes("model") ||
+    message.includes("language") ||
+    message.includes("unsupported") ||
+    message.includes("invalid")
+  );
+}
+
 export class DeepgramSttStream implements SttStream {
   readonly provider = "deepgram" as const;
   private connection: DeepgramLiveConnection | null = null;
@@ -32,11 +44,24 @@ export class DeepgramSttStream implements SttStream {
     const env = getServerEnv();
     const deepgram = createClient(env.DEEPGRAM_API_KEY);
     const language = getDeepgramLanguage(this.options.sourceLanguage);
+    const isUzbekTestMode = this.options.sourceLanguage === "uz";
+
+    if (isUzbekTestMode) {
+      console.info("[stt:deepgram] Uzbek STT test diagnostics", {
+        sessionId: this.options.sessionId,
+        sourceLanguage: this.options.sourceLanguage,
+        deepgramLanguage: language,
+        model: env.DEEPGRAM_MODEL,
+        endpointing: env.DEEPGRAM_ENDPOINTING_MS,
+        mimeType: this.options.mimeType
+      });
+    }
 
     debugInfo("[stt:deepgram] websocket connecting", {
       sessionId: this.options.sessionId,
       model: env.DEEPGRAM_MODEL,
       language,
+      uzbekTestMode: isUzbekTestMode,
       endpointing: env.DEEPGRAM_ENDPOINTING_MS,
       mimeType: this.options.mimeType
     });
@@ -52,6 +77,13 @@ export class DeepgramSttStream implements SttStream {
 
     this.connection.on(LiveTranscriptionEvents.Open, () => {
       this.isOpen = true;
+      if (isUzbekTestMode) {
+        console.info("[stt:deepgram] Uzbek STT test accepted by Deepgram", {
+          sessionId: this.options.sessionId,
+          deepgramLanguage: language,
+          model: env.DEEPGRAM_MODEL
+        });
+      }
       debugInfo("[stt:deepgram] websocket opened", {
         sessionId: this.options.sessionId,
         queuedAudioChunks: this.pendingAudio.length
@@ -88,6 +120,16 @@ export class DeepgramSttStream implements SttStream {
         sessionId: this.options.sessionId,
         message: normalizedError.message
       });
+      if (isUzbekTestMode && isDeepgramConfigError(normalizedError)) {
+        this.options.onError(
+          new SttProviderError(
+            this.provider,
+            "DEEPGRAM_UZBEK_UNSUPPORTED",
+            "Deepgram Uzbek STT is not supported by the selected model."
+          )
+        );
+        return;
+      }
       this.options.onError(normalizedError);
     });
 

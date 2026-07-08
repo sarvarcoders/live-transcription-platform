@@ -52,6 +52,7 @@ export function SubtitlePanel({
         ? copy.sttOpenai
         : copy.sttDeepgram
     : null;
+  const isDeepgramUzbekTest = activeProvider === "deepgram" && session?.sourceLanguage === "uz";
 
   return (
     <section
@@ -89,7 +90,7 @@ export function SubtitlePanel({
           </span>
           {providerLabel ? (
             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
-              STT: {providerLabel}
+              STT: {providerLabel}{isDeepgramUzbekTest ? " / Uzbek test" : ""}
             </span>
           ) : null}
           {onToggleFocus ? (

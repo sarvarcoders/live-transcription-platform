@@ -35,6 +35,7 @@ const TRANSLATION_ERROR_CODES = new Set([
 const STT_ERROR_CODES = new Set([
   "DEEPGRAM_AUTH_FAILED",
   "DEEPGRAM_CONFIG_FAILED",
+  "DEEPGRAM_UZBEK_UNSUPPORTED",
   "DEEPGRAM_STREAM_ERROR",
   "DEEPGRAM_START_FAILED",
   "GOOGLE_STT_NOT_CONFIGURED",
@@ -199,9 +200,9 @@ export function useLiveTranscription() {
     resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
-      setHasBroadcasterToken(false);
-      setSelectedSttProvider(null);
-      setIsRecording(false);
+    setHasBroadcasterToken(false);
+    setSelectedSttProvider(null);
+    setIsRecording(false);
     if (message) setError(message);
   }, [resetTranslationDisplay, stopLocalRecording]);
 
@@ -582,8 +583,8 @@ export function useLiveTranscription() {
     resetTranslationDisplay();
     setLatencySamples([]);
     setRole(null);
-      setHasBroadcasterToken(false);
-      setSelectedSttProvider(null);
+    setHasBroadcasterToken(false);
+    setSelectedSttProvider(null);
     credentialsRef.current = null;
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setConnectionState("idle");

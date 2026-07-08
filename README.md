@@ -129,6 +129,23 @@ Do not commit real API keys or Google service account JSON files. `.env`, `.env.
 
 The broadcaster UI also includes an advanced STT provider selector. The selected provider is stored per session, and the active provider is shown as a small `STT: ...` badge on the subtitle stage.
 
+## Deepgram Uzbek Test Mode
+
+To test whether Deepgram can handle Uzbek source speech before enabling Google STT:
+
+1. Set speaker language to **Uzbek**.
+2. Set translation language to **English** or **Russian**.
+3. Set STT provider to **Deepgram**.
+4. Start the microphone.
+
+If Deepgram accepts the `uz` language with the selected model, the normal flow runs:
+
+```text
+Uzbek speech -> Deepgram transcript -> OpenAI translation to English/Russian
+```
+
+The subtitle stage shows `STT: Deepgram / Uzbek test`. If Deepgram rejects the Uzbek language/model configuration, the app shows `Deepgram Uzbek STT is not supported by the selected model.` Google STT remains optional and is not required for this test.
+
 ## Google STT Setup
 
 1. Create or select a Google Cloud project.
