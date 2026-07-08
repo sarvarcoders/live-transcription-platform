@@ -2,7 +2,7 @@ import type { LanguageCode } from "./languages";
 
 export type SessionStatus = "waiting" | "live" | "ended" | "error" | "expired";
 export type ConnectionState = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected" | "error";
-export type SttProvider = "auto" | "deepgram" | "google" | "openai";
+export type SttProvider = "auto" | "deepgram" | "google" | "openai" | "uzbekvoice";
 export type ActiveSttProvider = Exclude<SttProvider, "auto">;
 
 export interface SessionSummary {

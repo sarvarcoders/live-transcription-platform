@@ -50,9 +50,12 @@ export function SubtitlePanel({
       ? copy.sttGoogle
       : activeProvider === "openai"
         ? copy.sttOpenai
-        : copy.sttDeepgram
+        : activeProvider === "uzbekvoice"
+          ? copy.sttUzbekVoice
+          : copy.sttDeepgram
     : null;
   const isDeepgramUzbekTest = activeProvider === "deepgram" && session?.sourceLanguage === "uz";
+  const isUzbekVoiceChunked = activeProvider === "uzbekvoice";
 
   return (
     <section
@@ -90,7 +93,7 @@ export function SubtitlePanel({
           </span>
           {providerLabel ? (
             <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
-              STT: {providerLabel}{isDeepgramUzbekTest ? " / Uzbek test" : ""}
+              STT: {providerLabel}{isDeepgramUzbekTest ? " / Uzbek test" : ""}{isUzbekVoiceChunked ? " / chunked" : ""}
             </span>
           ) : null}
           {onToggleFocus ? (
@@ -142,6 +145,9 @@ export function SubtitlePanel({
               <p className="mx-auto rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">
                 {translationPending}
               </p>
+            ) : null}
+            {isUzbekVoiceChunked ? (
+              <p className="mx-auto text-sm font-medium text-slate-400">{copy.uzbekVoiceLatencyNote}</p>
             ) : null}
           </div>
         ) : (

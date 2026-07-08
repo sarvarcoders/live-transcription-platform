@@ -8,7 +8,7 @@ const createSessionSchema = z.object({
   title: z.string().max(80).optional(),
   sourceLanguage: z.string().refine(isLanguageCode, "Unsupported source language"),
   targetLanguage: z.string().refine(isLanguageCode, "Unsupported target language").optional(),
-  sttProvider: z.enum(["auto", "deepgram", "google", "openai"]).optional()
+  sttProvider: z.enum(["auto", "deepgram", "google", "openai", "uzbekvoice"]).optional()
 });
 
 export async function GET() {

@@ -380,6 +380,7 @@ function scheduleFinalTranslation(io: TranslationServer, sessionId: string, segm
 }
 
 function getProviderLabel(provider: ActiveSttProvider) {
+  if (provider === "uzbekvoice") return "UzbekVoice";
   if (provider === "google") return "Google";
   if (provider === "openai") return "OpenAI";
   return "Deepgram";
@@ -533,8 +534,9 @@ export function registerSocketHandlers(io: TranslationServer) {
               activeStreams.get(sessionId)?.stop();
               activeStreams.delete(sessionId);
               try {
-                startProviderStream("deepgram", "STT provider switched to Deepgram");
-                socket.emit("connection:state", { state: "connected", message: "STT provider switched to Deepgram" });
+                const fallbackMessage = `${classifiedError.message} STT provider switched to Deepgram`;
+                startProviderStream("deepgram", fallbackMessage);
+                socket.emit("connection:state", { state: "connected", message: fallbackMessage });
                 return;
               } catch (fallbackError) {
                 const fallbackClassification = classifySttError("deepgram", fallbackError);
@@ -600,9 +602,10 @@ export function registerSocketHandlers(io: TranslationServer) {
         if (canFallbackToDeepgram(selection.provider)) {
           try {
             fallbackUsed = true;
-            startProviderStream("deepgram", "STT provider switched to Deepgram");
+            const fallbackMessage = `${classifiedError.message} STT provider switched to Deepgram`;
+            startProviderStream("deepgram", fallbackMessage);
             startAudioMonitoring();
-            socket.emit("connection:state", { state: "connected", message: "STT provider switched to Deepgram" });
+            socket.emit("connection:state", { state: "connected", message: fallbackMessage });
             return;
           } catch (fallbackError) {
             const fallbackClassification = classifySttError("deepgram", fallbackError);

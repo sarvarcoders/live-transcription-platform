@@ -11,6 +11,7 @@ Deepgram is the default speech-to-text provider. Google Cloud Speech-to-Text can
 - Pluggable STT provider layer with Deepgram default, Google optional, and OpenAI STT scaffold
 - Deepgram streaming speech-to-text with interim and final transcripts
 - Optional Google Cloud Speech-to-Text provider for source speech
+- Experimental UzbekVoice chunked STT provider for Uzbek source speech
 - OpenAI `gpt-4o-mini` translation for interim and final transcript segments
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
@@ -32,9 +33,11 @@ flowchart LR
   Browser["Browser<br/>MediaRecorder"] -->|"audio chunks<br/>Socket.io"| Server["Custom Node Server<br/>Next.js + Socket.io"]
   Server -->|"provider selection"| STT["STT Provider Layer<br/>Deepgram / Google / OpenAI"]
   STT -->|"default"| Deepgram["Deepgram<br/>Streaming API"]
+  STT -->|"chunked Uzbek"| UzbekVoice["UzbekVoice<br/>Upload STT"]
   STT -->|"optional"| Google["Google Cloud<br/>Speech-to-Text"]
   STT -->|"future"| OpenAISTT["OpenAI<br/>Realtime STT"]
   Deepgram -->|"interim/final transcripts"| STT
+  UzbekVoice -->|"chunked final transcripts"| STT
   Google -->|"interim/final transcripts"| STT
   OpenAISTT -->|"interim/final transcripts"| STT
   STT -->|"normalized transcripts"| Server
@@ -74,6 +77,15 @@ GOOGLE_STT_LANGUAGE_CODE=uz-UZ
 GOOGLE_STT_INTERIM_RESULTS=true
 OPENAI_STT_ENABLED=false
 OPENAI_STT_MODEL=gpt-realtime-whisper
+UZBEKVOICE_STT_ENABLED=false
+UZBEKVOICE_API_KEY=
+UZBEKVOICE_BASE_URL=https://uzbekvoice.ai
+UZBEKVOICE_STT_MODE=chunked
+UZBEKVOICE_STT_LANGUAGE=uz
+UZBEKVOICE_STT_MODEL=general
+UZBEKVOICE_STT_CHUNK_MS=3000
+UZBEKVOICE_STT_BLOCKING=true
+UZBEKVOICE_STT_TIMEOUT_MS=10000
 INTERIM_TRANSLATION_ENABLED=true
 INTERIM_TRANSLATION_MIN_CHARS=8
 INTERIM_TRANSLATION_MIN_INTERVAL_MS=350
@@ -107,6 +119,15 @@ Environment variable reference:
 - `GOOGLE_STT_INTERIM_RESULTS`: Enables Google interim transcript results. Default: `true`.
 - `OPENAI_STT_ENABLED`: Placeholder flag for future OpenAI realtime/audio STT. Default: `false`.
 - `OPENAI_STT_MODEL`: Future OpenAI STT model name. Default: `gpt-realtime-whisper`.
+- `UZBEKVOICE_STT_ENABLED`: Enables experimental UzbekVoice chunked STT. Default: `false`.
+- `UZBEKVOICE_API_KEY`: Server-side UzbekVoice API key. Never expose this to the browser.
+- `UZBEKVOICE_BASE_URL`: UzbekVoice API base URL. Default: `https://uzbekvoice.ai`.
+- `UZBEKVOICE_STT_MODE`: UzbekVoice mode. Currently only `chunked` is supported.
+- `UZBEKVOICE_STT_LANGUAGE`: UzbekVoice language value: `uz`, `ru`, or `uz-ru`. Default: `uz`.
+- `UZBEKVOICE_STT_MODEL`: UzbekVoice model: `general` or `enhanced-stt`. Default: `general`.
+- `UZBEKVOICE_STT_CHUNK_MS`: Audio chunk size sent to UzbekVoice. Default: `3000`.
+- `UZBEKVOICE_STT_BLOCKING`: Uses blocking upload for short chunks. Default: `true`.
+- `UZBEKVOICE_STT_TIMEOUT_MS`: Per-chunk UzbekVoice request timeout. Default: `10000`.
 - `INTERIM_TRANSLATION_ENABLED`: Enables speculative OpenAI translation for Deepgram interim transcripts. Default: `true`.
 - `INTERIM_TRANSLATION_MIN_CHARS`: Minimum stable interim transcript length before translation starts. Default: `8`.
 - `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `350`.
@@ -124,10 +145,39 @@ Do not commit real API keys or Google service account JSON files. `.env`, `.env.
 
 - `STT_PROVIDER=deepgram`: Always use Deepgram.
 - `STT_PROVIDER=google`: Always use Google STT. Requires Google env variables and credentials.
+- `STT_PROVIDER=uzbekvoice`: Uses UzbekVoice experimental chunked STT. This is file-upload based, not true realtime streaming.
 - `STT_PROVIDER=openai`: Uses the OpenAI STT scaffold. It is not the default and currently returns a clear not-implemented error.
-- `STT_PROVIDER=auto`: English and Russian use Deepgram. Uzbek uses Google if `GOOGLE_STT_ENABLED=true` and Google is configured; otherwise it falls back to Deepgram.
+- `STT_PROVIDER=auto`: English and Russian use Deepgram. Uzbek uses UzbekVoice if `UZBEKVOICE_STT_ENABLED=true` and configured; otherwise Google if configured; otherwise Deepgram.
 
 The broadcaster UI also includes an advanced STT provider selector. The selected provider is stored per session, and the active provider is shown as a small `STT: ...` badge on the subtitle stage.
+
+## UzbekVoice Chunked STT
+
+UzbekVoice's documented STT API is a file-upload endpoint, not a true WebSocket streaming API. This app supports it as an experimental chunked provider:
+
+```text
+Browser audio chunks -> Socket.io -> server buffers 2-4 seconds -> UzbekVoice multipart upload -> transcript -> OpenAI translation
+```
+
+Only one UzbekVoice request is active at a time. If speech continues while a request is in flight, the next audio buffers are queued and sent after the active request finishes. Duplicate repeated transcripts are skipped. The subtitle stage shows `STT: UzbekVoice / chunked` and a note that UzbekVoice chunked STT may be slightly delayed.
+
+For Railway:
+
+```env
+STT_PROVIDER=auto
+STT_AUTO_FALLBACK=true
+UZBEKVOICE_STT_ENABLED=true
+UZBEKVOICE_API_KEY=your_uzbekvoice_api_key
+UZBEKVOICE_BASE_URL=https://uzbekvoice.ai
+UZBEKVOICE_STT_MODE=chunked
+UZBEKVOICE_STT_LANGUAGE=uz
+UZBEKVOICE_STT_MODEL=general
+UZBEKVOICE_STT_CHUNK_MS=3000
+UZBEKVOICE_STT_BLOCKING=true
+UZBEKVOICE_STT_TIMEOUT_MS=10000
+```
+
+If `UZBEKVOICE_API_KEY` is missing, the app reports `UzbekVoice STT is not configured.` and can fall back to Deepgram when `STT_AUTO_FALLBACK=true`.
 
 ## Deepgram Uzbek Test Mode
 
@@ -208,6 +258,15 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_INTERIM_RESULTS=true`
    - `OPENAI_STT_ENABLED=false`
    - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `UZBEKVOICE_STT_ENABLED=false`
+   - `UZBEKVOICE_API_KEY=`
+   - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`
+   - `UZBEKVOICE_STT_MODE=chunked`
+   - `UZBEKVOICE_STT_LANGUAGE=uz`
+   - `UZBEKVOICE_STT_MODEL=general`
+   - `UZBEKVOICE_STT_CHUNK_MS=3000`
+   - `UZBEKVOICE_STT_BLOCKING=true`
+   - `UZBEKVOICE_STT_TIMEOUT_MS=10000`
    - `INTERIM_TRANSLATION_ENABLED=true`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
@@ -247,6 +306,15 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_INTERIM_RESULTS=true`
    - `OPENAI_STT_ENABLED=false`
    - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `UZBEKVOICE_STT_ENABLED=false`
+   - `UZBEKVOICE_API_KEY=`
+   - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`
+   - `UZBEKVOICE_STT_MODE=chunked`
+   - `UZBEKVOICE_STT_LANGUAGE=uz`
+   - `UZBEKVOICE_STT_MODEL=general`
+   - `UZBEKVOICE_STT_CHUNK_MS=3000`
+   - `UZBEKVOICE_STT_BLOCKING=true`
+   - `UZBEKVOICE_STT_TIMEOUT_MS=10000`
    - `INTERIM_TRANSLATION_ENABLED=true`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`

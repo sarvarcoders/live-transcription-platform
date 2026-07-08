@@ -4,6 +4,7 @@ import { getServerEnv } from "@/server/env";
 import { DeepgramSttStream } from "./deepgram-provider";
 import { GoogleSttStream, isGoogleSttConfigured } from "./google-provider";
 import { OpenAiSttStream } from "./openai-provider";
+import { UzbekVoiceChunkedSttStream, isUzbekVoiceConfigured } from "./uzbekvoice-provider";
 import type { ProviderSelection, SttStream, SttStreamOptions } from "./types";
 import { SttProviderError } from "./types";
 
@@ -21,16 +22,25 @@ export function selectSttProvider(sourceLanguage: LanguageCode, requested?: SttP
   if (requestedProvider === "deepgram") return { requestedProvider, provider: "deepgram" };
   if (requestedProvider === "google") return { requestedProvider, provider: "google" };
   if (requestedProvider === "openai") return { requestedProvider, provider: "openai" };
+  if (requestedProvider === "uzbekvoice") return { requestedProvider, provider: "uzbekvoice" };
 
   if (sourceLanguage === "uz") {
+    if (env.UZBEKVOICE_STT_ENABLED && isUzbekVoiceConfigured()) {
+      return { requestedProvider, provider: "uzbekvoice" };
+    }
+
     if (env.GOOGLE_STT_ENABLED && isGoogleSttConfigured()) {
-      return { requestedProvider, provider: "google" };
+      return {
+        requestedProvider,
+        provider: "google",
+        fallbackReason: env.UZBEKVOICE_STT_ENABLED ? "UzbekVoice STT is not configured." : "UzbekVoice STT is disabled"
+      };
     }
 
     return {
       requestedProvider,
       provider: "deepgram",
-      fallbackReason: env.GOOGLE_STT_ENABLED ? "Google STT is not fully configured" : "Google STT is disabled"
+      fallbackReason: env.UZBEKVOICE_STT_ENABLED ? "UzbekVoice STT is not configured." : "UzbekVoice STT is disabled"
     };
   }
 
@@ -45,6 +55,7 @@ export function canFallbackToDeepgram(provider: ActiveSttProvider) {
 export function createSttStream(provider: ActiveSttProvider, options: SttStreamOptions): SttStream {
   if (provider === "deepgram") return new DeepgramSttStream(options);
   if (provider === "google") return new GoogleSttStream(options);
+  if (provider === "uzbekvoice") return new UzbekVoiceChunkedSttStream(options);
   return new OpenAiSttStream(options);
 }
 
@@ -111,6 +122,19 @@ export function classifySttError(provider: ActiveSttProvider, error: unknown) {
       };
     }
     return { provider, code: "GOOGLE_STT_CONNECTION_FAILED", message: `Google STT connection failed: ${normalizedError.message}` };
+  }
+
+  if (provider === "uzbekvoice") {
+    if (message.includes("not configured") || message.includes("api key") || message.includes("401") || message.includes("403")) {
+      return { provider, code: "UZBEKVOICE_STT_NOT_CONFIGURED", message: "UzbekVoice STT is not configured." };
+    }
+    return {
+      provider,
+      code: "UZBEKVOICE_STT_FAILED",
+      message: normalizedError.message.startsWith("UzbekVoice STT failed:")
+        ? normalizedError.message
+        : `UzbekVoice STT failed: ${normalizedError.message}`
+    };
   }
 
   return { provider, code: "OPENAI_STT_FAILED", message: normalizedError.message };
