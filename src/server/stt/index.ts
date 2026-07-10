@@ -141,6 +141,10 @@ export function classifySttError(provider: ActiveSttProvider, error: unknown) {
   }
 
   if (provider === "openai") {
+    if (error instanceof SttProviderError) {
+      return { code: error.code, message: error.message, provider: error.provider };
+    }
+
     if (
       message.includes("not configured") ||
       message.includes("api key") ||

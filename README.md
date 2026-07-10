@@ -76,8 +76,11 @@ GOOGLE_STT_MODEL=chirp_3
 GOOGLE_STT_LANGUAGE_CODE=uz-UZ
 GOOGLE_STT_INTERIM_RESULTS=true
 OPENAI_STT_ENABLED=true
-OPENAI_STT_MODEL=gpt-realtime-whisper
+OPENAI_STT_MODE=chunked
+OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_STT_LANGUAGE=uz
+OPENAI_STT_CHUNK_MS=3000
+OPENAI_STT_TIMEOUT_MS=10000
 UZBEKVOICE_STT_ENABLED=false
 UZBEKVOICE_API_KEY=
 UZBEKVOICE_BASE_URL=https://uzbekvoice.ai
@@ -119,8 +122,11 @@ Environment variable reference:
 - `GOOGLE_STT_LANGUAGE_CODE`: Uzbek Google language code. Default: `uz-UZ`; English and Russian map to `en-US` and `ru-RU`.
 - `GOOGLE_STT_INTERIM_RESULTS`: Enables Google interim transcript results. Default: `true`.
 - `OPENAI_STT_ENABLED`: Enables OpenAI STT for Uzbek auto-routing. Default: `true` in `.env.example`.
-- `OPENAI_STT_MODEL`: OpenAI STT model name. Default: `gpt-realtime-whisper`.
+- `OPENAI_STT_MODE`: OpenAI STT mode. `chunked` is implemented. `realtime` requires a Realtime API implementation and is not sent to `/v1/audio/transcriptions`.
+- `OPENAI_STT_MODEL`: OpenAI STT model name for chunked audio transcription. Default: `gpt-4o-mini-transcribe`. Valid chunked models are `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, and `whisper-1`.
 - `OPENAI_STT_LANGUAGE`: OpenAI STT language hint. Default: `uz`.
+- `OPENAI_STT_CHUNK_MS`: Audio chunk size for chunked OpenAI STT. Default: `3000`.
+- `OPENAI_STT_TIMEOUT_MS`: Per-chunk OpenAI STT timeout. Default: `10000`.
 - `UZBEKVOICE_STT_ENABLED`: Enables experimental UzbekVoice chunked STT. Default: `false`.
 - `UZBEKVOICE_API_KEY`: Server-side UzbekVoice API key. Never expose this to the browser.
 - `UZBEKVOICE_BASE_URL`: UzbekVoice API base URL. Default: `https://uzbekvoice.ai`.
@@ -152,6 +158,16 @@ Do not commit real API keys or Google service account JSON files. `.env`, `.env.
 - `STT_PROVIDER=auto`: Uzbek uses OpenAI STT. English and Russian use Deepgram. Google and UzbekVoice are never used by auto-routing.
 
 The broadcaster UI also includes an advanced STT provider selector. The selected provider is stored per session, and the active provider is shown as a small `STT: ...` badge on the subtitle stage.
+
+## OpenAI Uzbek STT
+
+Auto-routing sends Uzbek source speech to OpenAI STT. The implemented mode is chunked audio transcription:
+
+```text
+Browser audio chunks -> Socket.io -> server buffers short chunks -> /v1/audio/transcriptions -> transcript -> OpenAI translation
+```
+
+Use `OPENAI_STT_MODEL=gpt-4o-mini-transcribe` for this mode. Do not use `gpt-realtime-whisper` with `/v1/audio/transcriptions`; realtime models require the OpenAI Realtime transcription API/session. If a realtime model is configured in chunked mode, the app returns `OpenAI realtime STT requires Realtime API, not audio transcriptions endpoint`.
 
 ## UzbekVoice Chunked STT
 
@@ -259,8 +275,11 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
    - `GOOGLE_STT_INTERIM_RESULTS=true`
    - `OPENAI_STT_ENABLED=true`
-   - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `OPENAI_STT_MODE=chunked`
+   - `OPENAI_STT_MODEL=gpt-4o-mini-transcribe`
    - `OPENAI_STT_LANGUAGE=uz`
+   - `OPENAI_STT_CHUNK_MS=3000`
+   - `OPENAI_STT_TIMEOUT_MS=10000`
    - `UZBEKVOICE_STT_ENABLED=false`
    - `UZBEKVOICE_API_KEY=`
    - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`
@@ -308,8 +327,11 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
    - `GOOGLE_STT_INTERIM_RESULTS=true`
    - `OPENAI_STT_ENABLED=true`
-   - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `OPENAI_STT_MODE=chunked`
+   - `OPENAI_STT_MODEL=gpt-4o-mini-transcribe`
    - `OPENAI_STT_LANGUAGE=uz`
+   - `OPENAI_STT_CHUNK_MS=3000`
+   - `OPENAI_STT_TIMEOUT_MS=10000`
    - `UZBEKVOICE_STT_ENABLED=false`
    - `UZBEKVOICE_API_KEY=`
    - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`
