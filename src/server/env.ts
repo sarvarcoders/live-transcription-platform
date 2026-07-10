@@ -14,6 +14,9 @@ const booleanFromEnv = z.preprocess((value) => {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }, z.boolean());
 
+const DEFAULT_OPENAI_STT_PROMPT =
+  "The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.";
+
 const envSchema = z.object({
   DEEPGRAM_API_KEY: z.string().min(1, "DEEPGRAM_API_KEY is required"),
   OPENAI_API_KEY: z.string().optional(),
@@ -35,6 +38,7 @@ const envSchema = z.object({
   OPENAI_STT_MODE: z.enum(["chunked", "realtime"]).default("chunked"),
   OPENAI_STT_MODEL: z.string().min(1).default("gpt-4o-mini-transcribe"),
   OPENAI_STT_LANGUAGE: z.string().min(2).default("uz"),
+  OPENAI_STT_PROMPT: z.string().min(1).default(DEFAULT_OPENAI_STT_PROMPT),
   OPENAI_STT_CHUNK_MS: z.coerce.number().int().min(1000).max(10000).default(3000),
   OPENAI_STT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
   UZBEKVOICE_STT_ENABLED: booleanFromEnv.default(false),
@@ -118,6 +122,7 @@ export function getEnvDiagnostics() {
     openaiSttMode: process.env.OPENAI_STT_MODE ?? "chunked",
     openaiSttModel: process.env.OPENAI_STT_MODEL ?? "gpt-4o-mini-transcribe",
     openaiSttLanguage: process.env.OPENAI_STT_LANGUAGE ?? "uz",
+    openaiSttPromptConfigured: Boolean(process.env.OPENAI_STT_PROMPT),
     openaiSttChunkMs: process.env.OPENAI_STT_CHUNK_MS ?? 3000,
     openaiSttTimeoutMs: process.env.OPENAI_STT_TIMEOUT_MS ?? 10000,
     uzbekVoiceSttEnabled: process.env.UZBEKVOICE_STT_ENABLED ?? false,
@@ -170,6 +175,7 @@ export function logEnvDiagnostics(context: string) {
     openaiSttMode: diagnostics.openaiSttMode,
     openaiSttModel: diagnostics.openaiSttModel,
     openaiSttLanguage: diagnostics.openaiSttLanguage,
+    openaiSttPromptConfigured: diagnostics.openaiSttPromptConfigured,
     openaiSttChunkMs: diagnostics.openaiSttChunkMs,
     openaiSttTimeoutMs: diagnostics.openaiSttTimeoutMs,
     uzbekVoiceSttEnabled: diagnostics.uzbekVoiceSttEnabled,
@@ -222,6 +228,7 @@ export function getServerEnv(): ServerEnv {
     OPENAI_STT_MODE: process.env.OPENAI_STT_MODE ?? "chunked",
     OPENAI_STT_MODEL: process.env.OPENAI_STT_MODEL ?? "gpt-4o-mini-transcribe",
     OPENAI_STT_LANGUAGE: process.env.OPENAI_STT_LANGUAGE ?? "uz",
+    OPENAI_STT_PROMPT: process.env.OPENAI_STT_PROMPT ?? DEFAULT_OPENAI_STT_PROMPT,
     OPENAI_STT_CHUNK_MS: process.env.OPENAI_STT_CHUNK_MS ?? 3000,
     OPENAI_STT_TIMEOUT_MS: process.env.OPENAI_STT_TIMEOUT_MS ?? 10000,
     UZBEKVOICE_STT_ENABLED: process.env.UZBEKVOICE_STT_ENABLED ?? false,

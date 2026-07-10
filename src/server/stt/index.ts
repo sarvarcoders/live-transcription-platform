@@ -145,6 +145,14 @@ export function classifySttError(provider: ActiveSttProvider, error: unknown) {
       return { code: error.code, message: error.message, provider: error.provider };
     }
 
+    if (message.includes("language code") && (message.includes("not recognized") || message.includes("not supported"))) {
+      return {
+        provider,
+        code: "OPENAI_STT_LANGUAGE_UNSUPPORTED",
+        message: "OpenAI STT language code is not supported. Using prompt-based language guidance is required."
+      };
+    }
+
     if (
       message.includes("not configured") ||
       message.includes("api key") ||

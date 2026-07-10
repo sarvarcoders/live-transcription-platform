@@ -48,6 +48,23 @@ function validateChunkedTranscriptionModel(model: string) {
   }
 }
 
+function isUzbekSourceLanguage(sourceLanguage: SttStreamOptions["sourceLanguage"]) {
+  return sourceLanguage === "uz";
+}
+
+function isUnsupportedLanguageCodeError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /language code/i.test(message) && /(not recognized|not supported)/i.test(message);
+}
+
+function createLanguageUnsupportedError() {
+  return new SttProviderError(
+    "openai",
+    "OPENAI_STT_LANGUAGE_UNSUPPORTED",
+    "OpenAI STT language code is not supported. Using prompt-based language guidance is required."
+  );
+}
+
 export class OpenAiSttStream implements SttStream {
   readonly provider = "openai" as const;
   private currentBuffers: Buffer[] = [];
@@ -80,7 +97,8 @@ export class OpenAiSttStream implements SttStream {
       sourceLanguage: this.options.sourceLanguage,
       mode: env.OPENAI_STT_MODE,
       model: env.OPENAI_STT_MODEL,
-      language: env.OPENAI_STT_LANGUAGE,
+      language: isUzbekSourceLanguage(this.options.sourceLanguage) ? "prompt-guided" : env.OPENAI_STT_LANGUAGE,
+      promptGuidance: isUzbekSourceLanguage(this.options.sourceLanguage),
       chunkMs: env.OPENAI_STT_CHUNK_MS,
       mimeType: this.options.mimeType
     });
@@ -137,19 +155,24 @@ export class OpenAiSttStream implements SttStream {
         sessionId: this.options.sessionId,
         byteLength: audio.byteLength,
         model: env.OPENAI_STT_MODEL,
-        language: env.OPENAI_STT_LANGUAGE
+        language: isUzbekSourceLanguage(this.options.sourceLanguage) ? "prompt-guided" : env.OPENAI_STT_LANGUAGE,
+        promptGuidance: isUzbekSourceLanguage(this.options.sourceLanguage)
       });
 
       const file = await toFile(audio, `chunk-${this.options.sessionId}-${startedAt}.webm`, {
         type: this.options.mimeType || "audio/webm"
       });
 
-      const response = await getClient().audio.transcriptions.create({
+      const transcriptionRequest = {
         file,
         model: env.OPENAI_STT_MODEL,
-        language: env.OPENAI_STT_LANGUAGE,
-        response_format: "json"
-      }, {
+        response_format: "json" as const,
+        ...(isUzbekSourceLanguage(this.options.sourceLanguage)
+          ? { prompt: env.OPENAI_STT_PROMPT }
+          : { language: env.OPENAI_STT_LANGUAGE })
+      };
+
+      const response = await getClient().audio.transcriptions.create(transcriptionRequest, {
         timeout: env.OPENAI_STT_TIMEOUT_MS
       });
 
@@ -168,6 +191,11 @@ export class OpenAiSttStream implements SttStream {
         provider: this.provider
       });
     } catch (error) {
+      if (isUnsupportedLanguageCodeError(error)) {
+        this.options.onError(createLanguageUnsupportedError());
+        return;
+      }
+
       this.options.onError(error instanceof Error ? error : new Error(String(error)));
     } finally {
       this.requestActive = false;

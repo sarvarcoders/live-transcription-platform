@@ -8,7 +8,7 @@ Deepgram is the default speech-to-text provider. Google Cloud Speech-to-Text can
 
 - Browser microphone capture with `MediaRecorder`
 - Live audio streaming over Socket.io
-- Pluggable STT provider layer with Deepgram default, Google optional, and OpenAI STT scaffold
+- Pluggable STT provider layer with Deepgram default, Google optional, and OpenAI chunked STT for Uzbek
 - Deepgram streaming speech-to-text with interim and final transcripts
 - Optional Google Cloud Speech-to-Text provider for source speech
 - Experimental UzbekVoice chunked STT provider for Uzbek source speech
@@ -79,6 +79,7 @@ OPENAI_STT_ENABLED=true
 OPENAI_STT_MODE=chunked
 OPENAI_STT_MODEL=gpt-4o-mini-transcribe
 OPENAI_STT_LANGUAGE=uz
+OPENAI_STT_PROMPT=The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.
 OPENAI_STT_CHUNK_MS=3000
 OPENAI_STT_TIMEOUT_MS=10000
 UZBEKVOICE_STT_ENABLED=false
@@ -124,7 +125,8 @@ Environment variable reference:
 - `OPENAI_STT_ENABLED`: Enables OpenAI STT for Uzbek auto-routing. Default: `true` in `.env.example`.
 - `OPENAI_STT_MODE`: OpenAI STT mode. `chunked` is implemented. `realtime` requires a Realtime API implementation and is not sent to `/v1/audio/transcriptions`.
 - `OPENAI_STT_MODEL`: OpenAI STT model name for chunked audio transcription. Default: `gpt-4o-mini-transcribe`. Valid chunked models are `gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, and `whisper-1`.
-- `OPENAI_STT_LANGUAGE`: OpenAI STT language hint. Default: `uz`.
+- `OPENAI_STT_LANGUAGE`: OpenAI STT language hint for non-Uzbek manual OpenAI STT usage. Default: `uz`. For Uzbek source speech, this value is not sent to `/v1/audio/transcriptions` because the endpoint can reject `uz`; prompt guidance is used instead.
+- `OPENAI_STT_PROMPT`: Prompt guidance for Uzbek OpenAI STT. Default: `The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.`
 - `OPENAI_STT_CHUNK_MS`: Audio chunk size for chunked OpenAI STT. Default: `3000`.
 - `OPENAI_STT_TIMEOUT_MS`: Per-chunk OpenAI STT timeout. Default: `10000`.
 - `UZBEKVOICE_STT_ENABLED`: Enables experimental UzbekVoice chunked STT. Default: `false`.
@@ -168,6 +170,14 @@ Browser audio chunks -> Socket.io -> server buffers short chunks -> /v1/audio/tr
 ```
 
 Use `OPENAI_STT_MODEL=gpt-4o-mini-transcribe` for this mode. Do not use `gpt-realtime-whisper` with `/v1/audio/transcriptions`; realtime models require the OpenAI Realtime transcription API/session. If a realtime model is configured in chunked mode, the app returns `OpenAI realtime STT requires Realtime API, not audio transcriptions endpoint`.
+
+For Uzbek source speech, the app does not pass `language=uz` to the transcription endpoint. Some OpenAI transcription models reject the Uzbek language code and return `Language code 'uz' is not recognized`. Instead, the server sends `OPENAI_STT_PROMPT` with Uzbek-specific guidance:
+
+```text
+The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.
+```
+
+If OpenAI still reports a language-code error, the UI shows `OpenAI STT language code is not supported. Using prompt-based language guidance is required.`
 
 ## UzbekVoice Chunked STT
 
@@ -278,6 +288,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `OPENAI_STT_MODE=chunked`
    - `OPENAI_STT_MODEL=gpt-4o-mini-transcribe`
    - `OPENAI_STT_LANGUAGE=uz`
+   - `OPENAI_STT_PROMPT=The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.`
    - `OPENAI_STT_CHUNK_MS=3000`
    - `OPENAI_STT_TIMEOUT_MS=10000`
    - `UZBEKVOICE_STT_ENABLED=false`
@@ -330,6 +341,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `OPENAI_STT_MODE=chunked`
    - `OPENAI_STT_MODEL=gpt-4o-mini-transcribe`
    - `OPENAI_STT_LANGUAGE=uz`
+   - `OPENAI_STT_PROMPT=The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.`
    - `OPENAI_STT_CHUNK_MS=3000`
    - `OPENAI_STT_TIMEOUT_MS=10000`
    - `UZBEKVOICE_STT_ENABLED=false`
