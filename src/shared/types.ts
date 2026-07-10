@@ -72,7 +72,14 @@ export interface ClientToServerEvents {
   "session:join": (payload: { sessionId: string; reconnectToken?: string }) => void;
   "session:leave": (payload: { sessionId: string }) => void;
   "audio:start": (payload: { sessionId: string; mimeType: string }) => void;
-  "audio:chunk": (payload: { sessionId: string; audio: ArrayBuffer; capturedAt: number; sentAt: number }) => void;
+  "audio:chunk": (payload: {
+    sessionId: string;
+    audio: ArrayBuffer;
+    capturedAt: number;
+    sentAt: number;
+    durationEstimateMs?: number;
+    isStandaloneFile?: boolean;
+  }) => void;
   "audio:stop": (payload: { sessionId: string }) => void;
 }
 

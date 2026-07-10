@@ -153,6 +153,29 @@ export function classifySttError(provider: ActiveSttProvider, error: unknown) {
       };
     }
 
+    if (message.includes("audio conversion failed")) {
+      return {
+        provider,
+        code: "OPENAI_STT_AUDIO_CONVERSION_FAILED",
+        message: "Audio conversion failed before OpenAI STT"
+      };
+    }
+
+    if (
+      message.includes("audio file might be corrupted") ||
+      message.includes("unsupported") ||
+      message.includes("invalid file format") ||
+      message.includes("could not decode")
+    ) {
+      return {
+        provider,
+        code: "OPENAI_STT_CHUNK_FAILED",
+        message: normalizedError.message.startsWith("OpenAI STT failed:")
+          ? normalizedError.message
+          : `OpenAI STT failed: ${normalizedError.message}`
+      };
+    }
+
     if (
       message.includes("not configured") ||
       message.includes("api key") ||

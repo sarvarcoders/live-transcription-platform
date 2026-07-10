@@ -14,13 +14,21 @@ export interface SttStreamOptions {
   mimeType: string;
   onTranscript: (transcript: SttTranscript) => void;
   onError: (error: Error) => void;
+  onRecoverableError?: (error: Error) => void;
   onClose: () => void;
+}
+
+export interface SttAudioChunkMetadata {
+  capturedAt?: number;
+  sentAt?: number;
+  durationEstimateMs?: number;
+  isStandaloneFile?: boolean;
 }
 
 export interface SttStream {
   readonly provider: ActiveSttProvider;
   start: () => void;
-  send: (audio: Buffer) => void;
+  send: (audio: Buffer, metadata?: SttAudioChunkMetadata) => void;
   stop: () => void;
 }
 

@@ -22,6 +22,7 @@ type StoredSessionCredentials = {
 
 const SESSION_STORAGE_KEY = "live-translation-session";
 const AUDIO_CHUNK_MS = 75;
+const OPENAI_STT_BROWSER_CHUNK_MS = 3000;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const SUBTITLE_MIN_DISPLAY_MS = 1000;
 
@@ -56,10 +57,15 @@ const STT_ERROR_CODES = new Set([
   "OPENAI_STT_FAILED",
   "NO_AUDIO_CHUNKS"
 ]);
+const RECOVERABLE_STT_ERROR_CODES = new Set(["OPENAI_STT_AUDIO_CONVERSION_FAILED", "OPENAI_STT_CHUNK_FAILED"]);
 
 function getRecorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
+}
+
+function shouldUseStandaloneOpenAiChunks(session: SessionSummary) {
+  return session.sttProvider === "openai" || session.activeSttProvider === "openai" || (session.sttProvider === "auto" && session.sourceLanguage === "uz");
 }
 
 function getMicrophoneErrorMessage(error: unknown) {
@@ -91,6 +97,8 @@ export function useLiveTranscription() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const credentialsRef = useRef<StoredSessionCredentials | null>(null);
+  const standaloneChunkingRef = useRef(false);
+  const standaloneChunkTimerRef = useRef<number | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [connectionMessage, setConnectionMessage] = useState<string>();
   const [session, setSession] = useState<SessionSummary | null>(null);
@@ -119,6 +127,13 @@ export function useLiveTranscription() {
     if (displayHoldTimerRef.current) {
       window.clearTimeout(displayHoldTimerRef.current);
       displayHoldTimerRef.current = null;
+    }
+  }, []);
+
+  const clearStandaloneChunkTimer = useCallback(() => {
+    if (standaloneChunkTimerRef.current) {
+      window.clearTimeout(standaloneChunkTimerRef.current);
+      standaloneChunkTimerRef.current = null;
     }
   }, []);
 
@@ -186,6 +201,8 @@ export function useLiveTranscription() {
   }, [clearDisplayHoldTimer]);
 
   const stopLocalRecording = useCallback(() => {
+    standaloneChunkingRef.current = false;
+    clearStandaloneChunkTimer();
     if (recorderRef.current?.state !== "inactive") {
       recorderRef.current?.stop();
     }
@@ -193,7 +210,7 @@ export function useLiveTranscription() {
     streamRef.current = null;
     recorderRef.current = null;
     setIsRecording(false);
-  }, []);
+  }, [clearStandaloneChunkTimer]);
 
   const clearLocalSessionState = useCallback((message?: string) => {
     stopLocalRecording();
@@ -371,6 +388,8 @@ export function useLiveTranscription() {
         );
       } else if (TRANSLATION_ERROR_CODES.has(code)) {
         setConnectionMessage(message);
+      } else if (RECOVERABLE_STT_ERROR_CODES.has(code)) {
+        setConnectionMessage(message);
       } else {
         setError(message);
         if (STT_ERROR_CODES.has(code)) {
@@ -521,29 +540,47 @@ export function useLiveTranscription() {
 
       const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
       streamRef.current = mediaStream;
-      recorderRef.current = recorder;
-
-      recorder.ondataavailable = async (event) => {
-        if (!event.data.size) return;
+      const emitAudioBlob = async (
+        blob: Blob,
+        capturedAt: number,
+        durationEstimateMs: number,
+        isStandaloneFile: boolean
+      ) => {
+        if (!blob.size) return;
         if (!socket.connected) {
           setError("Live server connection was lost. Audio chunks are not being sent.");
           return;
         }
 
-        const audio = await event.data.arrayBuffer();
+        const audio = await blob.arrayBuffer();
         const sentAt = Date.now();
         socket.emit("audio:chunk", {
           sessionId: session.id,
           audio,
-          capturedAt: sentAt - AUDIO_CHUNK_MS,
-          sentAt
+          capturedAt,
+          sentAt,
+          durationEstimateMs,
+          isStandaloneFile
         });
       };
 
-      recorder.onerror = (event) => {
-        const recorderError = event instanceof ErrorEvent ? event.error : undefined;
-        setError(recorderError instanceof Error ? recorderError.message : "Microphone recorder failed.");
-        setIsRecording(false);
+      const configureRecorderErrors = (activeRecorder: MediaRecorder) => {
+        activeRecorder.onerror = (event) => {
+          const recorderError = event instanceof ErrorEvent ? event.error : undefined;
+          setError(recorderError instanceof Error ? recorderError.message : "Microphone recorder failed.");
+          setIsRecording(false);
+        };
+      };
+
+      const useStandaloneOpenAiChunks = shouldUseStandaloneOpenAiChunks(session);
+
+      recorderRef.current = recorder;
+      configureRecorderErrors(recorder);
+
+      recorder.ondataavailable = async (event) => {
+        if (!event.data.size) return;
+        const sentAt = Date.now();
+        await emitAudioBlob(event.data, sentAt - AUDIO_CHUNK_MS, AUDIO_CHUNK_MS, false);
       };
 
       recorder.onstart = () => {
@@ -556,26 +593,71 @@ export function useLiveTranscription() {
       };
 
       socket.emit("audio:start", { sessionId: session.id, mimeType: mimeType || "audio/webm" });
-      recorder.start(AUDIO_CHUNK_MS);
+      if (useStandaloneOpenAiChunks) {
+        standaloneChunkingRef.current = true;
+
+        const startStandaloneRecorder = () => {
+          if (!standaloneChunkingRef.current || !streamRef.current?.active) return;
+          clearStandaloneChunkTimer();
+
+          const chunkRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+          const chunkStartedAt = Date.now();
+          recorderRef.current = chunkRecorder;
+          configureRecorderErrors(chunkRecorder);
+
+          chunkRecorder.ondataavailable = async (event) => {
+            await emitAudioBlob(event.data, chunkStartedAt, Date.now() - chunkStartedAt, true);
+          };
+
+          chunkRecorder.onstart = () => {
+            setIsRecording(true);
+            setConnectionMessage("Microphone is streaming.");
+          };
+
+          chunkRecorder.onstop = () => {
+            clearStandaloneChunkTimer();
+            if (standaloneChunkingRef.current && streamRef.current?.active) {
+              window.setTimeout(startStandaloneRecorder, 0);
+              return;
+            }
+            setIsRecording(false);
+          };
+
+          chunkRecorder.start();
+          standaloneChunkTimerRef.current = window.setTimeout(() => {
+            if (chunkRecorder.state === "recording") chunkRecorder.stop();
+          }, OPENAI_STT_BROWSER_CHUNK_MS);
+        };
+
+        startStandaloneRecorder();
+      } else {
+        recorder.start(AUDIO_CHUNK_MS);
+      }
     } catch (recordingError) {
+      standaloneChunkingRef.current = false;
+      clearStandaloneChunkTimer();
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       recorderRef.current = null;
       setIsRecording(false);
       setError(getMicrophoneErrorMessage(recordingError));
     }
-  }, [clearLocalSessionState, role, session, waitForConnectedSocket]);
+  }, [clearLocalSessionState, clearStandaloneChunkTimer, role, session, waitForConnectedSocket]);
 
   const stopRecording = useCallback(() => {
+    standaloneChunkingRef.current = false;
+    clearStandaloneChunkTimer();
     if (recorderRef.current?.state !== "inactive") {
-      recorderRef.current?.requestData();
+      if (!session || !shouldUseStandaloneOpenAiChunks(session)) {
+        recorderRef.current?.requestData();
+      }
       recorderRef.current?.stop();
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     if (session) socketRef.current?.emit("audio:stop", { sessionId: session.id });
     setIsRecording(false);
     setConnectionMessage(session ? "Session ready. Microphone is stopped." : undefined);
-  }, [session]);
+  }, [clearStandaloneChunkTimer, session]);
 
   const leaveSession = useCallback(() => {
     stopRecording();
@@ -618,8 +700,9 @@ export function useLiveTranscription() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       socketRef.current?.disconnect();
       clearDisplayHoldTimer();
+      clearStandaloneChunkTimer();
     };
-  }, [clearDisplayHoldTimer]);
+  }, [clearDisplayHoldTimer, clearStandaloneChunkTimer]);
 
   return useMemo(
     () => ({

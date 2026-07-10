@@ -574,6 +574,19 @@ export function registerSocketHandlers(io: TranslationServer) {
             });
             if (session) io.to(roomName(sessionId)).emit("session:updated", { session });
           },
+          onRecoverableError: (error) => {
+            const classifiedError = classifySttError(provider, error);
+            console.warn("[stt] recoverable provider error", {
+              sessionId,
+              provider,
+              code: classifiedError.code,
+              message: classifiedError.message
+            });
+            io.to(roomName(sessionId)).emit("server:error", {
+              code: classifiedError.code,
+              message: classifiedError.message
+            });
+          },
           onClose: () => {
             debugInfo("[socket] stt stream closed", {
               sessionId,
@@ -635,7 +648,7 @@ export function registerSocketHandlers(io: TranslationServer) {
       }
     });
 
-    socket.on("audio:chunk", ({ sessionId, audio, capturedAt, sentAt }) => {
+    socket.on("audio:chunk", ({ sessionId, audio, capturedAt, sentAt, durationEstimateMs, isStandaloneFile }) => {
       const stream = activeStreams.get(sessionId);
       if (!stream) return;
       const audioBuffer = toAudioBuffer(audio);
@@ -652,7 +665,9 @@ export function registerSocketHandlers(io: TranslationServer) {
           sessionId,
           count: nextStats.count,
           byteLength: audioBuffer.byteLength,
-          totalBytes: nextStats.totalBytes
+          totalBytes: nextStats.totalBytes,
+          durationEstimateMs,
+          isStandaloneFile
         });
       }
       lastAudioTimingBySession.set(sessionId, {
@@ -660,7 +675,7 @@ export function registerSocketHandlers(io: TranslationServer) {
         sentAt,
         audioReceivedAt: Date.now()
       });
-      stream.send(audioBuffer);
+      stream.send(audioBuffer, { capturedAt, sentAt, durationEstimateMs, isStandaloneFile });
     });
 
     socket.on("audio:stop", ({ sessionId }) => {
