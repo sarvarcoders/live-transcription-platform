@@ -27,6 +27,9 @@ type InterimTranslationState = {
   stabilityTimer?: NodeJS.Timeout;
 };
 
+const DEFAULT_NO_AUDIO_TIMEOUT_MS = 3000;
+const OPENAI_CHUNKED_NO_AUDIO_TIMEOUT_MS = 15000;
+
 const activeStreams = new Map<string, SttStream>();
 const audioChunkStatsBySession = new Map<string, { count: number; totalBytes: number; lastChunkAt?: number }>();
 const noAudioTimersBySession = new Map<string, NodeJS.Timeout>();
@@ -64,6 +67,50 @@ function clearNoAudioTimer(sessionId: string) {
   const timer = noAudioTimersBySession.get(sessionId);
   if (timer) clearTimeout(timer);
   noAudioTimersBySession.delete(sessionId);
+}
+
+function getNoAudioTimeoutMs(provider: ActiveSttProvider) {
+  return provider === "openai" ? OPENAI_CHUNKED_NO_AUDIO_TIMEOUT_MS : DEFAULT_NO_AUDIO_TIMEOUT_MS;
+}
+
+function resetNoAudioTimer(socket: TranslationSocket, sessionId: string, provider: ActiveSttProvider, reason: string) {
+  clearNoAudioTimer(sessionId);
+  const stats = audioChunkStatsBySession.get(sessionId);
+  if (stats && stats.count > 0) {
+    debugInfo("[socket] no-audio monitor cleared after progress", {
+      sessionId,
+      provider,
+      reason,
+      chunkCount: stats.count,
+      totalBytes: stats.totalBytes
+    });
+    return;
+  }
+
+  const timeoutMs = getNoAudioTimeoutMs(provider);
+  noAudioTimersBySession.set(
+    sessionId,
+    setTimeout(() => {
+      noAudioTimersBySession.delete(sessionId);
+      const latestStats = audioChunkStatsBySession.get(sessionId);
+      if (!latestStats || latestStats.count === 0) {
+        console.warn("[socket] no audio chunks received after audio:start", {
+          sessionId,
+          socketId: socket.id,
+          provider,
+          timeoutMs,
+          lastResetReason: reason
+        });
+        emitError(socket, "NO_AUDIO_CHUNKS", "Microphone started but no audio chunks were sent");
+      }
+    }, timeoutMs)
+  );
+  debugInfo("[socket] no-audio monitor armed", {
+    sessionId,
+    provider,
+    reason,
+    timeoutMs
+  });
 }
 
 function clearInterimStabilityTimer(sessionId: string) {
@@ -202,6 +249,13 @@ function requestInterimTranslation(io: TranslationServer, sessionId: string, seg
       if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
 
       const translationCompletedAt = Date.now();
+      console.info("[socket] translation received", {
+        sessionId,
+        segmentId: segment.id,
+        isFinal: false,
+        textLength: translatedText.length
+      });
+      clearNoAudioTimer(sessionId);
       emitSegment(io, sessionId, {
         ...segment,
         text: normalizedText,
@@ -318,6 +372,13 @@ function translateFinalSegment(io: TranslationServer, sessionId: string, segment
   })
     .then((translatedText) => {
       const translationCompletedAt = Date.now();
+      console.info("[socket] translation received", {
+        sessionId,
+        segmentId: segment.id,
+        isFinal: true,
+        textLength: translatedText.length
+      });
+      clearNoAudioTimer(sessionId);
       const translatedSegment: TranscriptSegment = {
         ...segment,
         translatedText,
@@ -587,6 +648,9 @@ export function registerSocketHandlers(io: TranslationServer) {
               message: classifiedError.message
             });
           },
+          onActivity: (activity) => {
+            resetNoAudioTimer(socket, sessionId, provider, activity);
+          },
           onClose: () => {
             debugInfo("[socket] stt stream closed", {
               sessionId,
@@ -609,24 +673,14 @@ export function registerSocketHandlers(io: TranslationServer) {
         });
       };
 
-      const startAudioMonitoring = () => {
+      const startAudioMonitoring = (provider: ActiveSttProvider) => {
         audioChunkStatsBySession.set(sessionId, { count: 0, totalBytes: 0 });
-        clearNoAudioTimer(sessionId);
-        noAudioTimersBySession.set(
-          sessionId,
-          setTimeout(() => {
-            const stats = audioChunkStatsBySession.get(sessionId);
-            if (!stats || stats.count === 0) {
-              console.warn("[socket] no audio chunks received after audio:start", { sessionId, socketId: socket.id });
-              emitError(socket, "NO_AUDIO_CHUNKS", "Microphone started but no audio chunks were sent");
-            }
-          }, 3000)
-        );
+        resetNoAudioTimer(socket, sessionId, provider, "audio:start");
       };
 
       try {
         startProviderStream(selection.provider, selection.fallbackReason);
-        startAudioMonitoring();
+        startAudioMonitoring(selection.provider);
         socket.emit("connection:state", { state: "connected", message: `${getProviderLabel(selection.provider)} STT stream started.` });
       } catch (error) {
         const classifiedError = classifySttError(selection.provider, error);
@@ -635,7 +689,7 @@ export function registerSocketHandlers(io: TranslationServer) {
             fallbackUsed = true;
             const fallbackMessage = `${classifiedError.message} STT provider switched to Deepgram`;
             startProviderStream("deepgram", fallbackMessage);
-            startAudioMonitoring();
+            startAudioMonitoring("deepgram");
             socket.emit("connection:state", { state: "connected", message: fallbackMessage });
             return;
           } catch (fallbackError) {
@@ -659,13 +713,22 @@ export function registerSocketHandlers(io: TranslationServer) {
         lastChunkAt: Date.now()
       };
       audioChunkStatsBySession.set(sessionId, nextStats);
-      clearNoAudioTimer(sessionId);
+      resetNoAudioTimer(socket, sessionId, stream.provider, "audio:chunk");
       if (nextStats.count <= 5 || nextStats.count % 50 === 0) {
         debugInfo("[socket] audio chunk received", {
           sessionId,
           count: nextStats.count,
           byteLength: audioBuffer.byteLength,
           totalBytes: nextStats.totalBytes,
+          durationEstimateMs,
+          isStandaloneFile
+        });
+      }
+      if (stream.provider === "openai") {
+        console.info("[socket] OpenAI STT chunk sent", {
+          sessionId,
+          count: nextStats.count,
+          byteLength: audioBuffer.byteLength,
           durationEstimateMs,
           isStandaloneFile
         });

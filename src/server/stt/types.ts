@@ -15,6 +15,7 @@ export interface SttStreamOptions {
   onTranscript: (transcript: SttTranscript) => void;
   onError: (error: Error) => void;
   onRecoverableError?: (error: Error) => void;
+  onActivity?: (activity: "stt_request_started" | "transcript_received") => void;
   onClose: () => void;
 }
 

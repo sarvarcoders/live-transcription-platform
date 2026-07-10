@@ -263,7 +263,8 @@ export class OpenAiSttStream implements SttStream {
     const startedAt = Date.now();
 
     try {
-      debugInfo("[stt:openai] transcription request started", {
+      this.options.onActivity?.("stt_request_started");
+      console.info("[stt:openai] transcription request started", {
         sessionId: this.options.sessionId,
         byteLength: audio.byteLength,
         durationEstimateMs: chunk.metadata?.durationEstimateMs,
@@ -303,7 +304,8 @@ export class OpenAiSttStream implements SttStream {
       const transcript = normalizeText(response.text ?? "");
       if (!transcript || this.isDuplicateTranscript(transcript)) return;
 
-      debugInfo("[stt:openai] transcript received", {
+      this.options.onActivity?.("transcript_received");
+      console.info("[stt:openai] transcript received", {
         sessionId: this.options.sessionId,
         textLength: transcript.length,
         latencyMs: Date.now() - startedAt

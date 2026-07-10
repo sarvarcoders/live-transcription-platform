@@ -346,7 +346,7 @@ export function useLiveTranscription() {
           setIsTranslationPending(false);
         }
       } else if (measuredSegment.translatedText) {
-        console.info("[frontend] translation update received", {
+        console.info("[frontend] translation received", {
           segmentId: measuredSegment.id,
           isFinal: measuredSegment.isFinal,
           translationStatus: measuredSegment.translationStatus
@@ -578,6 +578,11 @@ export function useLiveTranscription() {
       configureRecorderErrors(recorder);
 
       recorder.ondataavailable = async (event) => {
+        console.info("[frontend] MediaRecorder chunk received", {
+          byteLength: event.data.size,
+          mode: "streaming",
+          mimeType: event.data.type || mimeType || "audio/webm"
+        });
         if (!event.data.size) return;
         const sentAt = Date.now();
         await emitAudioBlob(event.data, sentAt - AUDIO_CHUNK_MS, AUDIO_CHUNK_MS, false);
@@ -586,6 +591,11 @@ export function useLiveTranscription() {
       recorder.onstart = () => {
         setIsRecording(true);
         setConnectionMessage("Microphone is streaming.");
+        console.info("[frontend] recording started", {
+          mode: useStandaloneOpenAiChunks ? "openai-chunked" : "streaming",
+          mimeType: mimeType || "audio/webm",
+          sessionId: session.id
+        });
       };
 
       recorder.onstop = () => {
@@ -606,17 +616,39 @@ export function useLiveTranscription() {
           configureRecorderErrors(chunkRecorder);
 
           chunkRecorder.ondataavailable = async (event) => {
+            console.info("[frontend] MediaRecorder chunk received", {
+              byteLength: event.data.size,
+              mode: "openai-chunked",
+              durationEstimateMs: Date.now() - chunkStartedAt,
+              mimeType: event.data.type || mimeType || "audio/webm"
+            });
             await emitAudioBlob(event.data, chunkStartedAt, Date.now() - chunkStartedAt, true);
+            if (event.data.size) {
+              console.info("[frontend] OpenAI STT chunk sent", {
+                byteLength: event.data.size,
+                durationEstimateMs: Date.now() - chunkStartedAt,
+                sessionId: session.id
+              });
+            }
           };
 
           chunkRecorder.onstart = () => {
             setIsRecording(true);
             setConnectionMessage("Microphone is streaming.");
+            console.info("[frontend] recording started", {
+              mode: "openai-chunked",
+              mimeType: mimeType || "audio/webm",
+              sessionId: session.id
+            });
           };
 
           chunkRecorder.onstop = () => {
             clearStandaloneChunkTimer();
             if (standaloneChunkingRef.current && streamRef.current?.active) {
+              console.info("[frontend] recording continues", {
+                mode: "openai-chunked",
+                sessionId: session.id
+              });
               window.setTimeout(startStandaloneRecorder, 0);
               return;
             }
@@ -645,6 +677,10 @@ export function useLiveTranscription() {
   }, [clearLocalSessionState, clearStandaloneChunkTimer, role, session, waitForConnectedSocket]);
 
   const stopRecording = useCallback(() => {
+    console.info("[frontend] recording stopped by user", {
+      sessionId: session?.id,
+      mode: session && shouldUseStandaloneOpenAiChunks(session) ? "openai-chunked" : "streaming"
+    });
     standaloneChunkingRef.current = false;
     clearStandaloneChunkTimer();
     if (recorderRef.current?.state !== "inactive") {
