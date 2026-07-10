@@ -62,7 +62,7 @@ DEEPGRAM_API_KEY=your_deepgram_api_key
 OPENAI_API_KEY=your_openai_api_key
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 PORT=3000
-STT_PROVIDER=deepgram
+STT_PROVIDER=auto
 STT_AUTO_FALLBACK=true
 DEEPGRAM_MODEL=nova-3
 DEEPGRAM_ENDPOINTING_MS=60
@@ -75,8 +75,9 @@ GOOGLE_STT_RECOGNIZER=_
 GOOGLE_STT_MODEL=chirp_3
 GOOGLE_STT_LANGUAGE_CODE=uz-UZ
 GOOGLE_STT_INTERIM_RESULTS=true
-OPENAI_STT_ENABLED=false
+OPENAI_STT_ENABLED=true
 OPENAI_STT_MODEL=gpt-realtime-whisper
+OPENAI_STT_LANGUAGE=uz
 UZBEKVOICE_STT_ENABLED=false
 UZBEKVOICE_API_KEY=
 UZBEKVOICE_BASE_URL=https://uzbekvoice.ai
@@ -104,7 +105,7 @@ Environment variable reference:
 - `OPENAI_API_KEY`: Optional but recommended. Enables OpenAI translation. If missing, Deepgram transcription still works and the UI shows `OpenAI translation is not configured`.
 - `NEXT_PUBLIC_APP_URL`: Required in production. Set to the public Railway or Render URL with protocol, for example `https://your-app.up.railway.app` or `https://your-app.onrender.com`. `your-app.up.railway.app` without `https://` is invalid. Comma-separated origins are supported if you need multiple allowed Socket.io origins.
 - `PORT`: Local development port. Railway and Render inject this automatically in production.
-- `STT_PROVIDER`: STT provider strategy: `deepgram`, `google`, `openai`, or `auto`. Default: `deepgram`.
+- `STT_PROVIDER`: STT provider strategy: `auto`, `deepgram`, `openai`, `uzbekvoice`, or `google`. Default: `auto`.
 - `STT_AUTO_FALLBACK`: If `true`, provider failures can fall back to Deepgram when possible. Default: `true`.
 - `DEEPGRAM_MODEL`: Deepgram model name. Default: `nova-3`.
 - `DEEPGRAM_ENDPOINTING_MS`: Deepgram endpointing value in milliseconds. Default: `60`.
@@ -117,8 +118,9 @@ Environment variable reference:
 - `GOOGLE_STT_MODEL`: Google STT model. Default: `chirp_3`. If your Google API rejects this with v1 streaming, use a supported model such as `latest_long`.
 - `GOOGLE_STT_LANGUAGE_CODE`: Uzbek Google language code. Default: `uz-UZ`; English and Russian map to `en-US` and `ru-RU`.
 - `GOOGLE_STT_INTERIM_RESULTS`: Enables Google interim transcript results. Default: `true`.
-- `OPENAI_STT_ENABLED`: Placeholder flag for future OpenAI realtime/audio STT. Default: `false`.
-- `OPENAI_STT_MODEL`: Future OpenAI STT model name. Default: `gpt-realtime-whisper`.
+- `OPENAI_STT_ENABLED`: Enables OpenAI STT for Uzbek auto-routing. Default: `true` in `.env.example`.
+- `OPENAI_STT_MODEL`: OpenAI STT model name. Default: `gpt-realtime-whisper`.
+- `OPENAI_STT_LANGUAGE`: OpenAI STT language hint. Default: `uz`.
 - `UZBEKVOICE_STT_ENABLED`: Enables experimental UzbekVoice chunked STT. Default: `false`.
 - `UZBEKVOICE_API_KEY`: Server-side UzbekVoice API key. Never expose this to the browser.
 - `UZBEKVOICE_BASE_URL`: UzbekVoice API base URL. Default: `https://uzbekvoice.ai`.
@@ -146,8 +148,8 @@ Do not commit real API keys or Google service account JSON files. `.env`, `.env.
 - `STT_PROVIDER=deepgram`: Always use Deepgram.
 - `STT_PROVIDER=google`: Always use Google STT. Requires Google env variables and credentials.
 - `STT_PROVIDER=uzbekvoice`: Uses UzbekVoice experimental chunked STT. This is file-upload based, not true realtime streaming.
-- `STT_PROVIDER=openai`: Uses the OpenAI STT scaffold. It is not the default and currently returns a clear not-implemented error.
-- `STT_PROVIDER=auto`: English and Russian use Deepgram. Uzbek uses UzbekVoice if `UZBEKVOICE_STT_ENABLED=true` and configured; otherwise Google if configured; otherwise Deepgram.
+- `STT_PROVIDER=openai`: Uses OpenAI STT.
+- `STT_PROVIDER=auto`: Uzbek uses OpenAI STT. English and Russian use Deepgram. Google and UzbekVoice are never used by auto-routing.
 
 The broadcaster UI also includes an advanced STT provider selector. The selected provider is stored per session, and the active provider is shown as a small `STT: ...` badge on the subtitle stage.
 
@@ -243,7 +245,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
    - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.up.railway.app`
-   - `STT_PROVIDER=deepgram`
+   - `STT_PROVIDER=auto`
    - `STT_AUTO_FALLBACK=true`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
@@ -256,8 +258,9 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_MODEL=chirp_3`
    - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
    - `GOOGLE_STT_INTERIM_RESULTS=true`
-   - `OPENAI_STT_ENABLED=false`
+   - `OPENAI_STT_ENABLED=true`
    - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `OPENAI_STT_LANGUAGE=uz`
    - `UZBEKVOICE_STT_ENABLED=false`
    - `UZBEKVOICE_API_KEY=`
    - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`
@@ -291,7 +294,7 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `DEEPGRAM_API_KEY=your_deepgram_api_key`
    - `OPENAI_API_KEY=your_openai_api_key`
    - `NEXT_PUBLIC_APP_URL=https://your-service.onrender.com`
-   - `STT_PROVIDER=deepgram`
+   - `STT_PROVIDER=auto`
    - `STT_AUTO_FALLBACK=true`
    - `DEEPGRAM_MODEL=nova-3`
    - `DEEPGRAM_ENDPOINTING_MS=60`
@@ -304,8 +307,9 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `GOOGLE_STT_MODEL=chirp_3`
    - `GOOGLE_STT_LANGUAGE_CODE=uz-UZ`
    - `GOOGLE_STT_INTERIM_RESULTS=true`
-   - `OPENAI_STT_ENABLED=false`
+   - `OPENAI_STT_ENABLED=true`
    - `OPENAI_STT_MODEL=gpt-realtime-whisper`
+   - `OPENAI_STT_LANGUAGE=uz`
    - `UZBEKVOICE_STT_ENABLED=false`
    - `UZBEKVOICE_API_KEY=`
    - `UZBEKVOICE_BASE_URL=https://uzbekvoice.ai`

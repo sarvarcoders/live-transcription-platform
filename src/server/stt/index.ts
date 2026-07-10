@@ -2,9 +2,9 @@ import type { ActiveSttProvider, SttProvider } from "@/shared/types";
 import type { LanguageCode } from "@/shared/languages";
 import { getServerEnv } from "@/server/env";
 import { DeepgramSttStream } from "./deepgram-provider";
-import { GoogleSttStream, isGoogleSttConfigured } from "./google-provider";
+import { GoogleSttStream } from "./google-provider";
 import { OpenAiSttStream } from "./openai-provider";
-import { UzbekVoiceChunkedSttStream, isUzbekVoiceConfigured } from "./uzbekvoice-provider";
+import { UzbekVoiceChunkedSttStream } from "./uzbekvoice-provider";
 import type { ProviderSelection, SttStream, SttStreamOptions } from "./types";
 import { SttProviderError } from "./types";
 
@@ -16,39 +16,42 @@ function normalizeRequestedProvider(provider?: SttProvider): SttProvider {
 }
 
 export function selectSttProvider(sourceLanguage: LanguageCode, requested?: SttProvider): ProviderSelection {
-  const env = getServerEnv();
   const requestedProvider = normalizeRequestedProvider(requested);
 
-  if (requestedProvider === "deepgram") return { requestedProvider, provider: "deepgram" };
+  if (requestedProvider === "deepgram") {
+    return {
+      requestedProvider,
+      provider: "deepgram",
+      fallbackReason:
+        sourceLanguage === "uz" ? "Deepgram does not reliably support Uzbek speech. Use OpenAI STT." : undefined
+    };
+  }
   if (requestedProvider === "google") return { requestedProvider, provider: "google" };
   if (requestedProvider === "openai") return { requestedProvider, provider: "openai" };
   if (requestedProvider === "uzbekvoice") return { requestedProvider, provider: "uzbekvoice" };
 
   if (sourceLanguage === "uz") {
-    if (env.UZBEKVOICE_STT_ENABLED && isUzbekVoiceConfigured()) {
-      return { requestedProvider, provider: "uzbekvoice" };
-    }
+    return {
+      requestedProvider,
+      provider: "openai",
+      fallbackReason: "Auto routing selected OpenAI STT for Uzbek speech"
+    };
+  }
 
-    if (env.GOOGLE_STT_ENABLED && isGoogleSttConfigured()) {
-      return {
-        requestedProvider,
-        provider: "google",
-        fallbackReason: env.UZBEKVOICE_STT_ENABLED ? "UzbekVoice STT is not configured." : "UzbekVoice STT is disabled"
-      };
-    }
-
+  if (sourceLanguage === "en" || sourceLanguage === "ru") {
     return {
       requestedProvider,
       provider: "deepgram",
-      fallbackReason: env.UZBEKVOICE_STT_ENABLED ? "UzbekVoice STT is not configured." : "UzbekVoice STT is disabled"
+      fallbackReason: `Auto routing selected Deepgram for ${sourceLanguage} speech`
     };
   }
 
   return { requestedProvider, provider: "deepgram" };
 }
 
-export function canFallbackToDeepgram(provider: ActiveSttProvider) {
+export function canFallbackToDeepgram(provider: ActiveSttProvider, sourceLanguage?: LanguageCode, requestedProvider?: SttProvider) {
   const env = getServerEnv();
+  if (sourceLanguage === "uz" && provider === "openai" && requestedProvider !== "deepgram") return false;
   return env.STT_AUTO_FALLBACK && provider !== "deepgram";
 }
 
@@ -134,6 +137,29 @@ export function classifySttError(provider: ActiveSttProvider, error: unknown) {
       message: normalizedError.message.startsWith("UzbekVoice STT failed:")
         ? normalizedError.message
         : `UzbekVoice STT failed: ${normalizedError.message}`
+    };
+  }
+
+  if (provider === "openai") {
+    if (
+      message.includes("not configured") ||
+      message.includes("api key") ||
+      message.includes("401") ||
+      message.includes("403")
+    ) {
+      return { provider, code: "OPENAI_STT_NOT_CONFIGURED", message: "OpenAI STT is not configured for Uzbek speech." };
+    }
+
+    if (message.includes("429") || message.includes("quota") || message.includes("billing")) {
+      return { provider, code: "OPENAI_STT_FAILED", message: "OpenAI STT failed: quota exceeded or billing is not active" };
+    }
+
+    return {
+      provider,
+      code: "OPENAI_STT_FAILED",
+      message: normalizedError.message.startsWith("OpenAI STT failed:")
+        ? normalizedError.message
+        : `OpenAI STT failed: ${normalizedError.message}`
     };
   }
 

@@ -465,8 +465,26 @@ export function registerSocketHandlers(io: TranslationServer) {
       activeStreams.get(sessionId)?.stop();
       resetAudioState(sessionId);
 
+      const env = getServerEnv();
       const requestedProvider = liveSession.sttProvider ?? getServerEnv().STT_PROVIDER;
       const selection = selectSttProvider(liveSession.sourceLanguage, requestedProvider);
+      const routingReason =
+        selection.fallbackReason ??
+        (liveSession.sourceLanguage === "uz" && selection.provider === "openai"
+          ? "Auto routing selected OpenAI STT for Uzbek speech"
+          : (liveSession.sourceLanguage === "en" || liveSession.sourceLanguage === "ru") && selection.provider === "deepgram"
+            ? `Auto routing selected Deepgram for ${liveSession.sourceLanguage} speech`
+            : "Manual STT provider selection");
+      console.info("[stt] routing decision", {
+        sessionId,
+        sourceLanguage: liveSession.sourceLanguage,
+        requestedProvider: selection.requestedProvider,
+        resolvedProvider: selection.provider,
+        routingReason,
+        openaiSttEnabled: env.OPENAI_STT_ENABLED,
+        deepgramUsedForEnglishRussian:
+          selection.provider === "deepgram" && (liveSession.sourceLanguage === "en" || liveSession.sourceLanguage === "ru")
+      });
       let fallbackUsed = false;
 
       const handleTranscript = (transcript: SttTranscript) => {
@@ -529,7 +547,7 @@ export function registerSocketHandlers(io: TranslationServer) {
               message: classifiedError.message
             });
 
-            if (canFallbackToDeepgram(provider) && !fallbackUsed) {
+            if (canFallbackToDeepgram(provider, liveSession.sourceLanguage, selection.requestedProvider) && !fallbackUsed) {
               fallbackUsed = true;
               activeStreams.get(sessionId)?.stop();
               activeStreams.delete(sessionId);
@@ -574,7 +592,7 @@ export function registerSocketHandlers(io: TranslationServer) {
           requestedProvider: selection.requestedProvider,
           provider,
           sourceLanguage: liveSession.sourceLanguage,
-          fallbackReason: message ?? selection.fallbackReason
+          routingReason: message ?? selection.fallbackReason ?? routingReason
         });
       };
 
@@ -599,7 +617,7 @@ export function registerSocketHandlers(io: TranslationServer) {
         socket.emit("connection:state", { state: "connected", message: `${getProviderLabel(selection.provider)} STT stream started.` });
       } catch (error) {
         const classifiedError = classifySttError(selection.provider, error);
-        if (canFallbackToDeepgram(selection.provider)) {
+        if (canFallbackToDeepgram(selection.provider, liveSession.sourceLanguage, selection.requestedProvider)) {
           try {
             fallbackUsed = true;
             const fallbackMessage = `${classifiedError.message} STT provider switched to Deepgram`;
