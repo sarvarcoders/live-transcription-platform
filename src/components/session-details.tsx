@@ -17,7 +17,7 @@ export function SessionDetails({ session, copy }: { session: SessionSummary; cop
   };
 
   return (
-    <div className="glass-panel-soft rounded-2xl p-3">
+    <div className="rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-950/50">
       <div className="grid gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{copy.sessionCode}</p>

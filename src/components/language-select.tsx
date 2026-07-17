@@ -20,13 +20,13 @@ export function LanguageSelect({ id, label, value, copy, onChange, disabled }: L
     <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor={id}>
       {label}
       <span className="relative block">
-        <Languages className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-600 dark:text-cyan-300" />
+        <Languages className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-600 dark:text-cyan-300" />
         <select
           id={id}
           value={value}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value as LanguageCode)}
-          className="glass-field w-full appearance-none rounded-xl py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 outline-none transition hover:bg-white/[0.65] focus:border-sky-300/70 focus:ring-4 focus:ring-sky-300/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-100 dark:hover:bg-white/10"
+          className="w-full appearance-none rounded-xl border border-slate-200/80 bg-white/90 py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 shadow-sm outline-none transition hover:border-brand-200 hover:bg-white focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-100 dark:hover:border-cyan-700 dark:focus:ring-brand-500/20 dark:disabled:bg-slate-900"
         >
           {SUPPORTED_LANGUAGES.map((language) => (
             <option key={language.code} value={language.code}>
@@ -34,7 +34,7 @@ export function LanguageSelect({ id, label, value, copy, onChange, disabled }: L
             </option>
           ))}
         </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-500/80 dark:text-cyan-200/80" />
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
       </span>
     </label>
   );
