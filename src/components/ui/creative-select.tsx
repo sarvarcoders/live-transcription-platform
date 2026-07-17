@@ -62,7 +62,7 @@ export function CreativeSelect<TValue extends string>({
   }, [isOpen]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className={cn("relative", isOpen && "z-[100]")}>
       <button
         id={id}
         type="button"
@@ -114,6 +114,8 @@ export function CreativeSelect<TValue extends string>({
           aria-labelledby={id}
           className={cn(
             "absolute top-full z-50 mt-2 min-w-full overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-50/[0.98] p-1.5 shadow-2xl shadow-slate-950/20 backdrop-blur-xl dark:border-cyan-400/20 dark:bg-slate-950/95",
+            size === "compact" &&
+              "z-[1000] w-max min-w-[13rem] border-cyan-400/25 bg-slate-950/95 shadow-[0_22px_70px_rgba(2,6,23,0.42)] dark:bg-slate-950/95",
             menuAlign === "right" ? "right-0" : "left-0 right-0"
           )}
         >
@@ -133,10 +135,13 @@ export function CreativeSelect<TValue extends string>({
                   setIsOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition",
+                  "flex w-full items-center gap-3 rounded-xl text-left text-sm transition",
+                  "px-3 py-2.5",
                   isSelected
                     ? "bg-gradient-to-r from-brand-500 to-cyan-500 text-white shadow-sm"
-                    : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
+                    : size === "compact"
+                      ? "text-slate-200 hover:bg-white/10"
+                      : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10"
                 )}
               >
                 {OptionIcon ? (

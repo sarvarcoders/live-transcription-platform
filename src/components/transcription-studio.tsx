@@ -206,7 +206,7 @@ export function TranscriptionStudio() {
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5">
-      <header className="flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
+      <header className="relative z-30 flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-cyan-300">{copy.appEyebrow}</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">{copy.appTitle}</h1>
