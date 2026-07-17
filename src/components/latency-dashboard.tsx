@@ -57,16 +57,18 @@ export function LatencyDashboard({ samples, copy }: LatencyDashboardProps) {
   const endToEndAverage = rows.find((row) => row.key === "totalLatencyMs")?.avg;
 
   return (
-    <section className="rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="glass-panel rounded-[1.45rem] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.latencyDashboard}</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">{copy.latencyDescription} ({samples.length})</p>
         </div>
-        <Activity className="h-5 w-5 text-brand-600" />
+        <span className="glass-icon grid h-9 w-9 place-items-center rounded-2xl text-sky-700 dark:text-cyan-100">
+          <Activity className="h-5 w-5" />
+        </span>
       </div>
 
-      <div className="mb-3 rounded-xl bg-slate-950 p-3 text-white">
+      <div className="mb-3 rounded-2xl border border-white/10 bg-slate-950/85 p-3 text-white shadow-inner backdrop-blur-xl">
         <p className="text-xs uppercase tracking-wide text-slate-300">{copy.averageEndToEnd}</p>
         <p className="mt-1 text-2xl font-bold">{formatMs(endToEndAverage)}</p>
         <p className="mt-1 text-xs text-slate-300">{copy.targetUnder}</p>
@@ -74,16 +76,16 @@ export function LatencyDashboard({ samples, copy }: LatencyDashboardProps) {
 
       <div className="grid gap-2">
         {rows.map((row) => (
-          <div key={row.key} className="rounded-xl border border-slate-200/80 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+          <div key={row.key} className="glass-panel-soft rounded-2xl p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{copy[row.labelKey]}</span>
               <span
                 className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                   row.isHealthy === undefined
-                    ? "bg-slate-100 text-slate-500"
+                    ? "glass-pill text-slate-500"
                     : row.isHealthy
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-amber-50 text-amber-700"
+                      ? "glass-pill text-emerald-700 dark:text-emerald-200"
+                      : "glass-pill text-amber-700 dark:text-amber-200"
                 }`}
               >
                 {copy.avg} {formatMs(row.avg)}

@@ -1,6 +1,6 @@
 "use client";
 
-import { Captions, Maximize2, Minimize2, Radio } from "lucide-react";
+import { Captions, Maximize2, Minimize2, Radio, Sparkles } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import { formatTime } from "@/lib/utils";
@@ -60,23 +60,26 @@ export function SubtitlePanel({
   return (
     <section
       className={cn(
-        "flex flex-col overflow-hidden rounded-2xl border border-slate-800/70 bg-slate-950 shadow-2xl shadow-slate-950/25",
+        "glass-panel flex flex-col overflow-hidden rounded-[2rem] bg-slate-950/85 shadow-2xl shadow-slate-950/25",
         isFocusMode ? "min-h-[calc(100vh-1rem)] sm:min-h-[calc(100vh-2rem)]" : "min-h-[36rem] xl:min-h-[calc(100vh-8.25rem)]"
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.025] px-4 py-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{copy.liveTranscript}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.045] px-4 py-3 backdrop-blur-2xl">
+        <div className="flex items-center gap-2">
+          <span className="glass-icon grid h-9 w-9 place-items-center rounded-2xl text-cyan-100">
+            <Sparkles className="h-4 w-4" />
+          </span>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">{copy.liveTranscript}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
             className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide",
+              "glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-wide",
               isRecording
-                ? "border-rose-400/40 bg-rose-500/15 text-rose-100"
+                ? "text-rose-100"
                 : isConnected
-                  ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
-                  : "border-white/10 bg-white/5 text-slate-300"
+                  ? "text-emerald-100"
+                  : "text-slate-300"
             )}
           >
             <span
@@ -87,12 +90,12 @@ export function SubtitlePanel({
             />
             {isRecording ? copy.live : isConnected ? copy.connected : copy.standby}
           </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200">
+          <span className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-200">
             <Radio className="h-3.5 w-3.5" />
             {session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : copy.noSession}
           </span>
           {providerLabel ? (
-            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
+            <span className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-cyan-100">
               STT: {providerLabel}{isDeepgramUzbekTest ? " / Uzbek test" : ""}{isUzbekVoiceChunked ? " / chunked" : ""}
             </span>
           ) : null}
@@ -100,7 +103,7 @@ export function SubtitlePanel({
             <button
               type="button"
               onClick={onToggleFocus}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+              className="glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
             >
               {isFocusMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
               {isFocusMode ? copy.exitFocus : copy.focusMode}
@@ -112,21 +115,22 @@ export function SubtitlePanel({
       </div>
 
       <div className="relative grid flex-1 place-items-center overflow-hidden px-5 py-8 sm:px-10 lg:px-14">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(34,211,238,0.18),transparent_32rem),linear-gradient(135deg,#020617_0%,#0f172a_48%,#111827_100%)]" />
-        <div className="pointer-events-none absolute inset-x-10 top-8 h-px bg-gradient-to-r from-transparent via-cyan-300/30 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(125,211,252,0.30),transparent_30rem),radial-gradient(circle_at_8%_82%,rgba(168,85,247,0.16),transparent_26rem),linear-gradient(135deg,#020617_0%,#0b1220_48%,#111827_100%)]" />
+        <div className="pointer-events-none absolute inset-x-8 top-8 h-px bg-gradient-to-r from-transparent via-cyan-200/45 to-transparent" />
+        <div className="pointer-events-none absolute left-1/2 top-12 h-44 w-3/5 -translate-x-1/2 rounded-full bg-white/10 blur-3xl" />
 
         {liveSegment ? (
           <div className="relative mx-auto grid w-full max-w-7xl gap-5 text-center">
-            <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium text-slate-400">
+            <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium text-slate-300">
               <span>{formatTime(liveSegment.startedAt)}</span>
               <span className="h-1 w-1 rounded-full bg-slate-600" />
               <span>{session ? getLocalizedLanguageLabel(session.targetLanguage, copy) : getLocalizedLanguageLabel(liveSegment.targetLanguage, copy)}</span>
               {!liveSegment.isFinal ? (
-                <span className="rounded-full bg-amber-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-amber-100">
+                <span className="glass-pill rounded-full px-2.5 py-1 font-bold uppercase tracking-wide text-amber-100">
                   {copy.interim}
                 </span>
               ) : (
-                <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-emerald-100">
+                <span className="glass-pill rounded-full px-2.5 py-1 font-bold uppercase tracking-wide text-emerald-100">
                   {copy.final}
                 </span>
               )}
@@ -134,7 +138,7 @@ export function SubtitlePanel({
             {displayTranslation ? (
               <p
                 className={cn(
-                  "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
+                  "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight drop-shadow-[0_18px_55px_rgba(56,189,248,0.18)] sm:text-6xl lg:text-7xl xl:text-8xl",
                   liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
                 )}
               >
@@ -142,7 +146,7 @@ export function SubtitlePanel({
               </p>
             ) : null}
             {showPendingIndicator ? (
-              <p className="mx-auto rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">
+              <p className="glass-pill mx-auto rounded-full px-4 py-2 text-sm font-semibold text-cyan-100">
                 {translationPending}
               </p>
             ) : null}
@@ -158,11 +162,11 @@ export function SubtitlePanel({
         )}
       </div>
 
-      <div className="border-t border-white/10 bg-white/[0.025] px-4 py-3">
+      <div className="border-t border-white/10 bg-white/[0.045] px-4 py-3 backdrop-blur-2xl">
         {recentSegments.length > 0 ? (
           <div className="grid gap-1.5">
             {recentSegments.map((segment) => (
-              <p key={segment.id} className="truncate rounded-lg px-3 py-1.5 text-sm text-slate-400">
+              <p key={segment.id} className="glass-panel-soft truncate rounded-xl px-3 py-1.5 text-sm text-slate-300">
                 {segment.translatedText || translationPending}
               </p>
             ))}

@@ -20,11 +20,11 @@ export function ConnectionStatus({ state, message, copy }: { state: ConnectionSt
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold",
-        isOnline && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        isLoading && "border-amber-200 bg-amber-50 text-amber-700",
-        !isOnline && !isLoading && "border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
-        state === "error" && "border-rose-200 bg-rose-50 text-rose-700"
+        "glass-pill inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold",
+        isOnline && "text-emerald-700 dark:text-emerald-200",
+        isLoading && "text-amber-700 dark:text-amber-200",
+        !isOnline && !isLoading && "text-slate-600 dark:text-slate-300",
+        state === "error" && "text-rose-700 dark:text-rose-200"
       )}
       title={message}
     >

@@ -93,10 +93,10 @@ export function HostControls({
         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
         : status === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-slate-200 bg-white text-slate-600";
+          : "border-white/50 bg-white/[0.35] text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300";
 
   return (
-    <section className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="glass-panel grid gap-3 rounded-[1.45rem] p-3">
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
         {copy.sessionTitle}
         <Input
@@ -128,13 +128,13 @@ export function HostControls({
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="stt-provider">
         {copy.sttProvider}
         <span className="relative block">
-          <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-600 dark:text-cyan-300" />
+          <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-600 dark:text-cyan-300" />
           <select
             id="stt-provider"
             value={sttProvider}
             disabled={hasSession}
             onChange={(event) => onSttProviderChange(event.target.value as SttProvider)}
-            className="w-full appearance-none rounded-xl border border-slate-200/80 bg-white/90 py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 shadow-sm outline-none transition hover:border-brand-200 hover:bg-white focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-100 dark:hover:border-cyan-700 dark:focus:ring-brand-500/20 dark:disabled:bg-slate-900"
+            className="glass-field w-full appearance-none rounded-xl py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 outline-none transition hover:bg-white/[0.65] focus:border-sky-300/70 focus:ring-4 focus:ring-sky-300/20 disabled:cursor-not-allowed disabled:opacity-60 dark:text-slate-100 dark:hover:bg-white/10"
           >
             <option value="auto">{copy.sttAuto}</option>
             <option value="deepgram">{copy.sttDeepgram}</option>
@@ -142,13 +142,13 @@ export function HostControls({
             <option value="openai">{copy.sttOpenai}</option>
             <option value="uzbekvoice">{copy.sttUzbekVoice}</option>
           </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-500/80 dark:text-cyan-200/80" />
         </span>
       </label>
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}
 
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
+      <div className="glass-panel-soft flex items-center justify-between gap-2 rounded-2xl px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{copy.status}</span>
         <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${statusTone}`}>
           <span className={`h-2 w-2 rounded-full ${isRecording ? "animate-pulse bg-rose-500" : isConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
