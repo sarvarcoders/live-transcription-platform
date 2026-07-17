@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Cpu, Mic, Radio, Square } from "lucide-react";
+import { Bot, Cpu, DatabaseZap, Mic, Radio, Sparkles, Square, Waves } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
 import type { ConnectionState, SessionSummary, SttProvider } from "@/shared/types";
@@ -8,6 +8,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { LanguageSelect } from "./language-select";
 import { SessionDetails } from "./session-details";
+import { CreativeSelect } from "./ui/creative-select";
 
 export type BroadcasterStatus = "idle" | "creating" | "ready" | "recording" | "stopped" | "error";
 
@@ -94,9 +95,16 @@ export function HostControls({
         : status === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
           : "border-slate-200 bg-white text-slate-600";
+  const sttProviderOptions = [
+    { value: "auto" as const, label: copy.sttAuto, Icon: Sparkles },
+    { value: "deepgram" as const, label: copy.sttDeepgram, Icon: Waves },
+    { value: "google" as const, label: copy.sttGoogle, Icon: DatabaseZap },
+    { value: "openai" as const, label: copy.sttOpenai, Icon: Bot },
+    { value: "uzbekvoice" as const, label: copy.sttUzbekVoice, Icon: Radio }
+  ];
 
   return (
-    <section className="grid gap-3 rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="grid gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
         {copy.sessionTitle}
         <Input
@@ -127,23 +135,15 @@ export function HostControls({
 
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="stt-provider">
         {copy.sttProvider}
-        <span className="relative block">
-          <Cpu className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-600 dark:text-cyan-300" />
-          <select
-            id="stt-provider"
-            value={sttProvider}
-            disabled={hasSession}
-            onChange={(event) => onSttProviderChange(event.target.value as SttProvider)}
-            className="w-full appearance-none rounded-xl border border-slate-200/80 bg-white/90 py-3 pl-10 pr-10 text-sm font-semibold text-slate-950 shadow-sm outline-none transition hover:border-brand-200 hover:bg-white focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950/80 dark:text-slate-100 dark:hover:border-cyan-700 dark:focus:ring-brand-500/20 dark:disabled:bg-slate-900"
-          >
-            <option value="auto">{copy.sttAuto}</option>
-            <option value="deepgram">{copy.sttDeepgram}</option>
-            <option value="google">{copy.sttGoogle}</option>
-            <option value="openai">{copy.sttOpenai}</option>
-            <option value="uzbekvoice">{copy.sttUzbekVoice}</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-        </span>
+        <CreativeSelect
+          id="stt-provider"
+          value={sttProvider}
+          options={sttProviderOptions}
+          disabled={hasSession}
+          Icon={Cpu}
+          ariaLabel={copy.sttProvider}
+          onChange={(provider) => onSttProviderChange(provider as SttProvider)}
+        />
       </label>
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}

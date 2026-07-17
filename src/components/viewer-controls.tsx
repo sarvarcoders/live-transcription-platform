@@ -25,7 +25,7 @@ export function ViewerControls({
   copy
 }: ViewerControlsProps) {
   return (
-    <section className="grid gap-4 rounded-2xl border border-white/70 bg-white/75 p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="grid gap-4 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
       <div>
         <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.viewerControls}</h2>
         <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">{copy.viewerDescription}</p>

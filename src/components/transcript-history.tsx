@@ -8,7 +8,7 @@ import type { TranscriptSegment } from "@/shared/types";
 
 export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegment[]; copy: UiCopy }) {
   return (
-    <section className="rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-slate-950 dark:text-white">{copy.history}</h2>

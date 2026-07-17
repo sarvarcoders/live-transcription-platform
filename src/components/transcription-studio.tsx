@@ -206,7 +206,7 @@ export function TranscriptionStudio() {
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5">
-      <header className="flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-white/75 px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
+      <header className="flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-cyan-300">{copy.appEyebrow}</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">{copy.appTitle}</h1>
@@ -223,7 +223,7 @@ export function TranscriptionStudio() {
           <button
             type="button"
             onClick={() => setFocusMode(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white/80 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:ring-brand-500/20"
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-slate-50/90 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand-200 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:ring-brand-500/20"
           >
             <Maximize2 className="h-4 w-4" />
             {copy.focusMode}
@@ -233,13 +233,13 @@ export function TranscriptionStudio() {
 
       <div className="grid items-start gap-3 lg:grid-cols-[17.5rem_minmax(0,1fr)_18.5rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_19.5rem]">
         <aside className="order-2 grid content-start gap-3 lg:order-1 lg:sticky lg:top-3">
-          <div className="rounded-2xl border border-white/70 bg-white/75 p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
-            <div className="grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-100/70 p-1 dark:border-slate-700 dark:bg-slate-950/70">
+          <div className="rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+            <div className="grid grid-cols-2 rounded-lg border border-slate-200/80 bg-slate-200/[0.45] p-1 dark:border-slate-700 dark:bg-slate-950/70">
               <button
                 type="button"
                 onClick={() => switchMode("broadcaster")}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                  mode === "broadcaster" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
+                  mode === "broadcaster" ? "bg-white/90 text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
               >
                 {copy.broadcasterMode}
@@ -248,7 +248,7 @@ export function TranscriptionStudio() {
                 type="button"
                 onClick={() => switchMode("viewer")}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
-                  mode === "viewer" ? "bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
+                  mode === "viewer" ? "bg-white/90 text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
               >
                 {copy.viewerMode}

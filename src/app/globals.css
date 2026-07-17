@@ -4,7 +4,7 @@
 
 :root {
   color-scheme: light;
-  background: #f8fafc;
+  background: #eef3fb;
 }
 
 * {
@@ -21,8 +21,9 @@ body {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background:
-    radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 32rem),
-    linear-gradient(180deg, #ffffff 0%, #f8fafc 42%, #eef2ff 100%);
+    radial-gradient(circle at 14% 8%, rgba(59, 130, 246, 0.11), transparent 30rem),
+    radial-gradient(circle at 86% 6%, rgba(14, 165, 233, 0.08), transparent 28rem),
+    linear-gradient(180deg, #f6f9fd 0%, #eef3fb 44%, #e8eef8 100%);
   color: #0f172a;
 }
 
