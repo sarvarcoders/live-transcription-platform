@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, Minimize2 } from "lucide-react";
+import { ArrowRight, Languages, Mic2, Minimize2, TriangleAlert } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import { getLocalizedLanguageLabel } from "@/lib/language-labels";
 import type { ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
@@ -20,6 +20,70 @@ interface SubtitlePanelProps {
   copy: UiCopy;
   isFocusMode?: boolean;
   onToggleFocus?: () => void;
+}
+
+type StageVisualState = "idle" | "ready" | "listening" | "transcribing" | "translating" | "error";
+
+function AudioLevelVisual({ level, label }: { level: number; label: string }) {
+  const normalizedLevel = Math.max(0, Math.min(1, level));
+  const hasSignal = normalizedLevel > 0.008;
+  const barShape = [0.45, 0.7, 0.9, 1, 0.82, 0.62, 0.38];
+
+  return (
+    <div
+      className="grid h-20 w-20 place-items-center rounded-full border border-cyan-300/20 bg-cyan-300/[0.06]"
+      role="meter"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(normalizedLevel * 100)}
+    >
+      {hasSignal ? (
+        <div className="flex h-10 items-center justify-center gap-1.5" aria-hidden="true">
+          {barShape.map((shape, index) => (
+            <span
+              key={index}
+              className="w-1.5 rounded-full bg-cyan-300 transition-[height] duration-75"
+              style={{ height: `${Math.max(5, Math.round(normalizedLevel * shape * 38))}px` }}
+            />
+          ))}
+        </div>
+      ) : (
+        <Mic2 className="h-8 w-8 text-cyan-200" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
+
+function StageStateIcon({ state, audioLevel, copy }: { state: StageVisualState; audioLevel: number; copy: UiCopy }) {
+  if (state === "listening" || state === "transcribing") {
+    return <AudioLevelVisual level={audioLevel} label={copy.inputLevel} />;
+  }
+
+  const isReady = state === "ready";
+
+  return (
+    <div
+      className={cn(
+        "relative grid h-20 w-20 place-items-center rounded-full border bg-slate-950/70",
+        state === "error"
+          ? "border-rose-300/25 text-rose-200"
+          : "border-cyan-300/20 text-cyan-200 ring-1 ring-violet-400/10"
+      )}
+      aria-hidden="true"
+    >
+      {state === "error" ? (
+        <TriangleAlert className="h-8 w-8" />
+      ) : state === "idle" || state === "translating" ? (
+        <Languages className="h-8 w-8" />
+      ) : (
+        <Mic2 className="h-8 w-8" />
+      )}
+      {isReady ? (
+        <span className="absolute bottom-2.5 right-2.5 h-3.5 w-3.5 rounded-full border-2 border-slate-950 bg-emerald-400" />
+      ) : null}
+    </div>
+  );
 }
 
 export function SubtitlePanel({
@@ -42,21 +106,47 @@ export function SubtitlePanel({
   const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
   const previousTranslations = segments
     .filter((segment) => segment.isFinal && segment.translatedText && segment.translatedText !== displayTranslation)
-    .slice(-2);
+    .slice(-1);
   const sourceLabel = session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : null;
   const targetLabel = session ? getLocalizedLanguageLabel(session.targetLanguage, copy) : null;
   const isReconnecting = connectionState === "connecting" || connectionState === "reconnecting";
+  const hasError = connectionState === "error" || session?.status === "error";
+  const isTranscribing = Boolean(isRecording && interimSegment?.text && !isTranslationPending);
 
-  const emptyTitle = !session
-    ? copy.readyToTranslate
-    : isRecording
-      ? copy.listeningTitle
-      : copy.microphoneReadyTitle;
-  const emptyDescription = !session
-    ? copy.readyToTranslateDescription
-    : isRecording
-      ? copy.listeningDescription
-      : copy.startSpeakingDescription;
+  const stageState: StageVisualState = hasError
+    ? "error"
+    : !session
+      ? "idle"
+      : showPendingIndicator
+        ? "translating"
+        : isTranscribing
+          ? "transcribing"
+          : isRecording
+            ? "listening"
+            : "ready";
+
+  const emptyTitle = stageState === "error"
+    ? copy.centerStageErrorTitle
+    : stageState === "translating"
+      ? copy.translationInProgress
+      : stageState === "transcribing"
+        ? copy.transcribingStatus
+        : !session
+          ? copy.readyToTranslate
+          : isRecording
+            ? copy.listeningTitle
+            : copy.microphoneReadyTitle;
+  const emptyDescription = stageState === "error"
+    ? copy.centerStageErrorDescription
+    : stageState === "translating"
+      ? copy.translationPreparingDescription
+      : !session
+        ? copy.readyToTranslateDescription
+        : isRecording
+          ? audioLevel > 0.008
+            ? copy.listeningDescription
+            : copy.waitingForAudioSignal
+          : copy.startSpeakingDescription;
 
   return (
     <section
@@ -67,21 +157,45 @@ export function SubtitlePanel({
     >
       <div className="flex min-h-12 items-center justify-between gap-3 border-b border-white/10 bg-white/[0.025] px-4 py-2.5">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">{copy.liveTranscript}</p>
-        {isFocusMode && onToggleFocus ? (
-          <button
-            type="button"
-            onClick={onToggleFocus}
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-cyan-300"
-          >
-            <Minimize2 className="h-3.5 w-3.5" />
-            {copy.exitFocus}
-          </button>
-        ) : null}
+        <div className="flex items-center justify-end gap-2">
+          {hasError ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-300/20 bg-rose-300/10 px-2.5 py-1 text-[0.68rem] font-bold text-rose-100">
+              <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+              {copy.globalStatusError}
+            </span>
+          ) : showPendingIndicator ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-300/20 bg-violet-300/10 px-2.5 py-1 text-[0.68rem] font-bold text-violet-100">
+              <Languages className="h-3.5 w-3.5" aria-hidden="true" />
+              {copy.translationInProgress}
+            </span>
+          ) : null}
+          {isFocusMode && onToggleFocus ? (
+            <button
+              type="button"
+              onClick={onToggleFocus}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-cyan-300"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+              {copy.exitFocus}
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="relative flex flex-1 items-end justify-center overflow-hidden px-5 pb-[12%] pt-12 sm:px-10 lg:px-14">
+      <div className="relative flex-1 overflow-hidden px-5 sm:px-10 lg:px-14">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(14,165,233,0.13),transparent_32rem),linear-gradient(145deg,#020617_0%,#0a1830_52%,#101827_100%)]" />
-        <div className="relative z-10 mx-auto grid w-full max-w-6xl gap-5 text-center">
+        <div
+          className={cn(
+            "absolute inset-x-5 z-10 mx-auto grid max-w-6xl -translate-y-1/2 gap-5 text-center sm:inset-x-10 lg:inset-x-14",
+            displayTranslation
+              ? isFocusMode
+                ? "top-[65%]"
+                : "top-[59%]"
+              : !session
+                ? "top-[46%]"
+                : "top-1/2"
+          )}
+        >
           {displayTranslation ? (
             <>
               <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-semibold text-slate-400">
@@ -97,43 +211,41 @@ export function SubtitlePanel({
               <p className="mx-auto max-w-5xl text-balance font-display text-4xl font-semibold leading-[1.12] text-white sm:text-5xl lg:text-6xl 2xl:text-7xl">
                 {displayTranslation}
               </p>
-              {showPendingIndicator ? (
-                <p className="mx-auto rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1.5 text-xs font-bold text-violet-100">
-                  {copy.translationInProgress}
-                </p>
-              ) : null}
             </>
           ) : (
-            <div className="mx-auto grid max-w-2xl gap-3">
+            <div className="mx-auto grid max-w-2xl justify-items-center gap-3">
+              <StageStateIcon state={stageState} audioLevel={audioLevel} copy={copy} />
               <p className="font-display text-3xl font-semibold text-white sm:text-5xl">{emptyTitle}</p>
               <p className="text-base leading-7 text-slate-400">{emptyDescription}</p>
+              {!session ? (
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-2 text-xs font-semibold text-slate-500">
+                  <span>{copy.readyStepSession}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-cyan-300/70" aria-hidden="true" />
+                  <span>{copy.microphone}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-violet-300/70" aria-hidden="true" />
+                  <span>{copy.readyStepSpeak}</span>
+                </div>
+              ) : null}
               {session && sourceLabel && targetLabel ? (
                 <p className="mx-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300">
                   {sourceLabel}<ArrowRight className="h-3.5 w-3.5 text-cyan-300" />{targetLabel}
                 </p>
-              ) : null}
-              {isRecording ? (
-                <div className="mx-auto mt-2 w-full max-w-sm" role="meter" aria-label={copy.inputLevel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(audioLevel * 100)}>
-                  <div className="h-2 overflow-hidden rounded-full bg-white/10">
-                    <div className="h-full rounded-full bg-cyan-400 transition-[width] duration-75" style={{ width: `${Math.max(0, Math.min(100, audioLevel * 100))}%` }} />
-                  </div>
-                </div>
               ) : null}
             </div>
           )}
         </div>
       </div>
 
-      <div className="min-h-14 border-t border-white/10 bg-white/[0.025] px-4 py-3">
+      <div className="min-h-10 border-t border-white/10 bg-white/[0.02] px-4 py-2">
         {previousTranslations.length > 0 ? (
-          <div className="grid gap-1 text-center">
+          <div className="grid text-center">
             {previousTranslations.map((segment) => (
-              <p key={segment.id} className="truncate text-sm text-slate-500">{segment.translatedText}</p>
+              <p key={segment.id} className="truncate text-xs text-slate-600">{segment.translatedText}</p>
             ))}
           </div>
-        ) : (
-          <p className="text-center text-xs text-slate-600">{session ? copy.finalSnippets : copy.readyToTranslateDescription}</p>
-        )}
+        ) : session ? (
+          <p className="text-center text-[0.68rem] text-slate-700">{copy.finalSnippets}</p>
+        ) : null}
       </div>
     </section>
   );
