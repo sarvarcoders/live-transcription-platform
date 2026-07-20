@@ -19,6 +19,7 @@ interface DeepgramTranscriptEvent {
     }>;
   };
   is_final?: unknown;
+  speech_final?: unknown;
 }
 
 function isDeepgramConfigError(error: Error) {
@@ -102,6 +103,7 @@ export class DeepgramSttStream implements SttStream {
       debugInfo("[stt:deepgram] transcript received", {
         sessionId: this.options.sessionId,
         isFinal: Boolean(event.is_final),
+        speechFinal: Boolean(event.speech_final),
         confidence: typeof alternative?.confidence === "number" ? alternative.confidence : undefined,
         textLength: text.length
       });
@@ -109,6 +111,7 @@ export class DeepgramSttStream implements SttStream {
       this.options.onTranscript({
         text,
         isFinal: Boolean(event.is_final),
+        speechFinal: Boolean(event.speech_final),
         confidence: typeof alternative?.confidence === "number" ? alternative.confidence : undefined,
         provider: this.provider
       });

@@ -7,7 +7,9 @@ import { formatTime } from "@/lib/utils";
 import type { TranscriptSegment } from "@/shared/types";
 
 export function TranscriptHistory({ segments, copy }: { segments: TranscriptSegment[]; copy: UiCopy }) {
-  const finalSegments = segments.filter((segment) => segment.isFinal);
+  const finalSegments = segments.filter(
+    (segment) => segment.isFinal && segment.translationStatus === "complete" && segment.translatedText
+  );
 
   return (
     <section className="rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">

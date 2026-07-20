@@ -103,7 +103,7 @@ export function SubtitlePanel({
 }: SubtitlePanelProps) {
   const liveSegment = pendingTranslation ?? interimSegment ?? segments.at(-1) ?? null;
   const displayTranslation = lastDisplayedTranslation ?? lastFinalTranslation ?? null;
-  const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
+  const showPendingIndicator = Boolean(isTranslationPending || liveSegment?.translationStatus === "pending");
   const previousTranslations = segments
     .filter((segment) => segment.isFinal && segment.translatedText && segment.translatedText !== displayTranslation)
     .slice(-1);

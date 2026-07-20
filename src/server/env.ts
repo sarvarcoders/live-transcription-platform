@@ -14,6 +14,20 @@ const booleanFromEnv = z.preprocess((value) => {
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }, z.boolean());
 
+const translationSegmentModeFromEnv = z.preprocess(
+  (value) => (typeof value === "string" && value.trim().toLowerCase() === "fast" ? "fast" : "stable"),
+  z.enum(["stable", "fast"])
+);
+
+function clampedInteger(defaultValue: number, min: number, max: number) {
+  return z.preprocess((value) => {
+    if (value === undefined || value === null || (typeof value === "string" && !value.trim())) return defaultValue;
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) return defaultValue;
+    return Math.min(max, Math.max(min, Math.round(parsed)));
+  }, z.number().int());
+}
+
 const DEFAULT_OPENAI_STT_PROMPT =
   "The audio is in Uzbek. Transcribe the Uzbek speech accurately. Preserve Uzbek words and names.";
 
@@ -54,7 +68,14 @@ const envSchema = z.object({
   UZBEKVOICE_STT_CHUNK_MS: z.coerce.number().int().min(1000).max(10000).default(3000),
   UZBEKVOICE_STT_BLOCKING: booleanFromEnv.default(true),
   UZBEKVOICE_STT_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
-  INTERIM_TRANSLATION_ENABLED: booleanFromEnv.default(true),
+  TRANSLATION_SEGMENT_MODE: translationSegmentModeFromEnv,
+  TRANSLATION_COMMIT_ON_PUNCTUATION: booleanFromEnv.default(true),
+  TRANSLATION_COMMIT_SILENCE_MS: clampedInteger(900, 250, 5000),
+  TRANSLATION_SEGMENT_MIN_CHARS: clampedInteger(12, 4, 80),
+  TRANSLATION_SEGMENT_MAX_CHARS: clampedInteger(140, 40, 500),
+  TRANSLATION_SEGMENT_MAX_DURATION_MS: clampedInteger(7000, 1000, 30000),
+  TRANSLATION_FINAL_DEBOUNCE_MS: clampedInteger(150, 0, 2000),
+  INTERIM_TRANSLATION_ENABLED: booleanFromEnv.default(false),
   INTERIM_TRANSLATION_MIN_CHARS: z.coerce.number().int().min(1).max(200).default(8),
   INTERIM_TRANSLATION_MIN_INTERVAL_MS: z.coerce.number().int().min(50).max(5000).default(350),
   INTERIM_TRANSLATION_STABILITY_MS: z.coerce.number().int().min(100).max(3000).default(400),
@@ -63,7 +84,10 @@ const envSchema = z.object({
   FINAL_TRANSLATION_DEBOUNCE_MS: z.coerce.number().int().min(0).max(5000).default(120),
   OPENAI_TRANSLATION_TIMEOUT_MS: z.coerce.number().int().min(500).max(10000).default(1800),
   OPENAI_TRANSLATION_MAX_TOKENS: z.coerce.number().int().min(20).max(300).default(70)
-});
+}).transform((env) => ({
+  ...env,
+  TRANSLATION_SEGMENT_MIN_CHARS: Math.min(env.TRANSLATION_SEGMENT_MIN_CHARS, env.TRANSLATION_SEGMENT_MAX_CHARS)
+}));
 
 export type ServerEnv = z.infer<typeof envSchema>;
 
@@ -143,7 +167,14 @@ export function getEnvDiagnostics() {
     uzbekVoiceSttChunkMs: process.env.UZBEKVOICE_STT_CHUNK_MS ?? 3000,
     uzbekVoiceSttBlocking: process.env.UZBEKVOICE_STT_BLOCKING ?? true,
     uzbekVoiceSttTimeoutMs: process.env.UZBEKVOICE_STT_TIMEOUT_MS ?? 10000,
-    interimTranslationEnabled: process.env.INTERIM_TRANSLATION_ENABLED ?? true,
+    translationSegmentMode: process.env.TRANSLATION_SEGMENT_MODE ?? "stable",
+    translationCommitOnPunctuation: process.env.TRANSLATION_COMMIT_ON_PUNCTUATION ?? true,
+    translationCommitSilenceMs: process.env.TRANSLATION_COMMIT_SILENCE_MS ?? 900,
+    translationSegmentMinChars: process.env.TRANSLATION_SEGMENT_MIN_CHARS ?? 12,
+    translationSegmentMaxChars: process.env.TRANSLATION_SEGMENT_MAX_CHARS ?? 140,
+    translationSegmentMaxDurationMs: process.env.TRANSLATION_SEGMENT_MAX_DURATION_MS ?? 7000,
+    translationFinalDebounceMs: process.env.TRANSLATION_FINAL_DEBOUNCE_MS ?? 150,
+    interimTranslationEnabled: process.env.INTERIM_TRANSLATION_ENABLED ?? false,
     interimTranslationMinChars: process.env.INTERIM_TRANSLATION_MIN_CHARS ?? 8,
     interimTranslationMinIntervalMs: process.env.INTERIM_TRANSLATION_MIN_INTERVAL_MS ?? 350,
     interimTranslationStabilityMs: process.env.INTERIM_TRANSLATION_STABILITY_MS ?? 400,
@@ -200,6 +231,13 @@ export function logEnvDiagnostics(context: string) {
     uzbekVoiceSttChunkMs: diagnostics.uzbekVoiceSttChunkMs,
     uzbekVoiceSttBlocking: diagnostics.uzbekVoiceSttBlocking,
     uzbekVoiceSttTimeoutMs: diagnostics.uzbekVoiceSttTimeoutMs,
+    translationSegmentMode: diagnostics.translationSegmentMode,
+    translationCommitOnPunctuation: diagnostics.translationCommitOnPunctuation,
+    translationCommitSilenceMs: diagnostics.translationCommitSilenceMs,
+    translationSegmentMinChars: diagnostics.translationSegmentMinChars,
+    translationSegmentMaxChars: diagnostics.translationSegmentMaxChars,
+    translationSegmentMaxDurationMs: diagnostics.translationSegmentMaxDurationMs,
+    translationFinalDebounceMs: diagnostics.translationFinalDebounceMs,
     interimTranslationEnabled: diagnostics.interimTranslationEnabled,
     interimTranslationMinChars: diagnostics.interimTranslationMinChars,
     interimTranslationMinIntervalMs: diagnostics.interimTranslationMinIntervalMs,
@@ -256,7 +294,14 @@ export function getServerEnv(): ServerEnv {
     UZBEKVOICE_STT_CHUNK_MS: process.env.UZBEKVOICE_STT_CHUNK_MS ?? 3000,
     UZBEKVOICE_STT_BLOCKING: process.env.UZBEKVOICE_STT_BLOCKING ?? true,
     UZBEKVOICE_STT_TIMEOUT_MS: process.env.UZBEKVOICE_STT_TIMEOUT_MS ?? 10000,
-    INTERIM_TRANSLATION_ENABLED: process.env.INTERIM_TRANSLATION_ENABLED ?? true,
+    TRANSLATION_SEGMENT_MODE: process.env.TRANSLATION_SEGMENT_MODE ?? "stable",
+    TRANSLATION_COMMIT_ON_PUNCTUATION: process.env.TRANSLATION_COMMIT_ON_PUNCTUATION ?? true,
+    TRANSLATION_COMMIT_SILENCE_MS: process.env.TRANSLATION_COMMIT_SILENCE_MS ?? 900,
+    TRANSLATION_SEGMENT_MIN_CHARS: process.env.TRANSLATION_SEGMENT_MIN_CHARS ?? 12,
+    TRANSLATION_SEGMENT_MAX_CHARS: process.env.TRANSLATION_SEGMENT_MAX_CHARS ?? 140,
+    TRANSLATION_SEGMENT_MAX_DURATION_MS: process.env.TRANSLATION_SEGMENT_MAX_DURATION_MS ?? 7000,
+    TRANSLATION_FINAL_DEBOUNCE_MS: process.env.TRANSLATION_FINAL_DEBOUNCE_MS ?? 150,
+    INTERIM_TRANSLATION_ENABLED: process.env.INTERIM_TRANSLATION_ENABLED ?? false,
     INTERIM_TRANSLATION_MIN_CHARS: process.env.INTERIM_TRANSLATION_MIN_CHARS ?? 8,
     INTERIM_TRANSLATION_MIN_INTERVAL_MS: process.env.INTERIM_TRANSLATION_MIN_INTERVAL_MS ?? 350,
     INTERIM_TRANSLATION_STABILITY_MS: process.env.INTERIM_TRANSLATION_STABILITY_MS ?? 400,

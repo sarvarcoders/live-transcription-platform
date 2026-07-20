@@ -73,6 +73,7 @@ export function TranscriptionStudio() {
   const live = useLiveTranscription();
   const copy = uiCopy[locale];
   const visibleError = formError || live.error;
+  const visibleWarning = live.warning;
   const broadcasterStatus = getBroadcasterStatus({
     isCreating,
     isRecording: live.isRecording,
@@ -407,6 +408,8 @@ export function TranscriptionStudio() {
             live.clearError();
           }}
         />
+      ) : visibleWarning ? (
+        <LiveErrorToast message={visibleWarning} copy={copy} onDismiss={live.clearWarning} />
       ) : null}
     </main>
   );

@@ -61,7 +61,11 @@ const STT_ERROR_CODES = new Set([
   "OPENAI_STT_FAILED",
   "NO_AUDIO_CHUNKS"
 ]);
-const RECOVERABLE_STT_ERROR_CODES = new Set(["OPENAI_STT_AUDIO_CONVERSION_FAILED", "OPENAI_STT_CHUNK_FAILED"]);
+const RECOVERABLE_STT_ERROR_CODES = new Set([
+  "OPENAI_STT_AUDIO_CONVERSION_FAILED",
+  "OPENAI_STT_CHUNK_FAILED",
+  "OPENAI_STT_BACKLOG"
+]);
 
 function getRecorderMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"];
@@ -120,6 +124,7 @@ export function useLiveTranscription() {
   const [lastDisplayUpdateAt, setLastDisplayUpdateAt] = useState(0);
   const [latencySamples, setLatencySamples] = useState<LatencyMetrics[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [role, setRole] = useState<LiveRole | null>(null);
@@ -131,6 +136,10 @@ export function useLiveTranscription() {
   const lastDisplayUpdateAtRef = useRef(0);
   const displayHoldTimerRef = useRef<number | null>(null);
   const queuedDisplayRef = useRef<TranscriptSegment | null>(null);
+  const lastAudioChunkSendRef = useRef<Promise<void>>(Promise.resolve());
+  const requestedStopSessionIdRef = useRef<string | null>(null);
+  const stopCompletionRef = useRef<(() => void) | null>(null);
+  const stopFinalizingRef = useRef(false);
 
   const clearDisplayHoldTimer = useCallback(() => {
     if (displayHoldTimerRef.current) {
@@ -144,6 +153,30 @@ export function useLiveTranscription() {
       window.clearTimeout(standaloneChunkTimerRef.current);
       standaloneChunkTimerRef.current = null;
     }
+  }, []);
+
+  const finishRequestedRecordingStop = useCallback(() => {
+    if (stopFinalizingRef.current) return;
+    const sessionId = requestedStopSessionIdRef.current;
+    if (!sessionId) {
+      stopCompletionRef.current?.();
+      stopCompletionRef.current = null;
+      return;
+    }
+
+    stopFinalizingRef.current = true;
+    void lastAudioChunkSendRef.current
+      .catch(() => undefined)
+      .finally(() => {
+        if (socketRef.current?.connected) {
+          socketRef.current.emit("audio:stop", { sessionId });
+          console.info("[frontend] final audio chunk sent; audio:stop emitted", { sessionId });
+        }
+        requestedStopSessionIdRef.current = null;
+        stopFinalizingRef.current = false;
+        stopCompletionRef.current?.();
+        stopCompletionRef.current = null;
+      });
   }, []);
 
   const stopAudioLevelMeter = useCallback(() => {
@@ -281,6 +314,7 @@ export function useLiveTranscription() {
     setHasBroadcasterToken(false);
     setSelectedSttProvider(null);
     setIsRecording(false);
+    setWarning(null);
     if (message) setError(message);
   }, [resetTranslationDisplay, stopLocalRecording]);
 
@@ -351,6 +385,7 @@ export function useLiveTranscription() {
       setRole(liveRole);
       setHasBroadcasterToken(liveRole === "broadcaster" && Boolean(reconnectToken));
       setError(null);
+      setWarning(null);
       console.info("[frontend] session ready", {
         sessionId: readySession.id,
         role: liveRole,
@@ -391,8 +426,11 @@ export function useLiveTranscription() {
       const measuredSegment = { ...segment, metrics };
       const translationStartedAt = metrics.translationStartedAt ?? clientReceivedAt;
       const segmentStartedAt = Date.parse(measuredSegment.startedAt) || clientReceivedAt;
-      latestSeenTranscriptStartedAtRef.current = Math.max(latestSeenTranscriptStartedAtRef.current, segmentStartedAt);
-      const isLatestTranscriptUpdate = segmentStartedAt >= latestSeenTranscriptStartedAtRef.current;
+      const isTranslationUpdate = Boolean(measuredSegment.translationStatus || measuredSegment.translatedText);
+      if (isTranslationUpdate) {
+        latestSeenTranscriptStartedAtRef.current = Math.max(latestSeenTranscriptStartedAtRef.current, segmentStartedAt);
+      }
+      const isLatestTranscriptUpdate = !isTranslationUpdate || segmentStartedAt >= latestSeenTranscriptStartedAtRef.current;
 
       setLatencySamples((current) => [...current.slice(-119), metrics]);
 
@@ -411,7 +449,7 @@ export function useLiveTranscription() {
           latestAcceptedTranslationStartedAtRef.current = translationStartedAt;
           queueDisplayedTranslation(measuredSegment);
         }
-      } else if (isLatestTranscriptUpdate && (measuredSegment.translationStatus === "pending" || !measuredSegment.isFinal)) {
+      } else if (isLatestTranscriptUpdate && measuredSegment.translationStatus === "pending") {
         setPendingTranslation(measuredSegment);
         setIsTranslationPending(true);
       }
@@ -444,8 +482,10 @@ export function useLiveTranscription() {
         );
       } else if (TRANSLATION_ERROR_CODES.has(code)) {
         setConnectionMessage(message);
+        setWarning(message);
       } else if (RECOVERABLE_STT_ERROR_CODES.has(code)) {
         setConnectionMessage(message);
+        setWarning(message);
       } else {
         setError(message);
         if (STT_ERROR_CODES.has(code)) {
@@ -512,6 +552,7 @@ export function useLiveTranscription() {
         socketConnected: socketRef.current?.connected ?? false
       });
       setError(null);
+      setWarning(null);
       setSegments([]);
       setInterimSegment(null);
       resetTranslationDisplay();
@@ -529,6 +570,7 @@ export function useLiveTranscription() {
   const joinSession = useCallback(
     (sessionId: string) => {
       setError(null);
+      setWarning(null);
       setSegments([]);
       setInterimSegment(null);
       resetTranslationDisplay();
@@ -596,6 +638,10 @@ export function useLiveTranscription() {
       });
 
       const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+      requestedStopSessionIdRef.current = null;
+      stopCompletionRef.current = null;
+      stopFinalizingRef.current = false;
+      lastAudioChunkSendRef.current = Promise.resolve();
       streamRef.current = mediaStream;
       startAudioLevelMeter(mediaStream);
       const emitAudioBlob = async (
@@ -621,6 +667,18 @@ export function useLiveTranscription() {
           isStandaloneFile
         });
       };
+      const queueAudioBlob = (
+        blob: Blob,
+        capturedAt: number,
+        durationEstimateMs: number,
+        isStandaloneFile: boolean
+      ) => {
+        const sendPromise = lastAudioChunkSendRef.current
+          .catch(() => undefined)
+          .then(() => emitAudioBlob(blob, capturedAt, durationEstimateMs, isStandaloneFile));
+        lastAudioChunkSendRef.current = sendPromise;
+        return sendPromise;
+      };
 
       const configureRecorderErrors = (activeRecorder: MediaRecorder) => {
         activeRecorder.onerror = (event) => {
@@ -643,7 +701,7 @@ export function useLiveTranscription() {
         });
         if (!event.data.size) return;
         const sentAt = Date.now();
-        await emitAudioBlob(event.data, sentAt - AUDIO_CHUNK_MS, AUDIO_CHUNK_MS, false);
+        await queueAudioBlob(event.data, sentAt - AUDIO_CHUNK_MS, AUDIO_CHUNK_MS, false);
       };
 
       recorder.onstart = () => {
@@ -658,6 +716,7 @@ export function useLiveTranscription() {
 
       recorder.onstop = () => {
         setIsRecording(false);
+        finishRequestedRecordingStop();
       };
 
       socket.emit("audio:start", { sessionId: session.id, mimeType: mimeType || "audio/webm" });
@@ -680,7 +739,7 @@ export function useLiveTranscription() {
               durationEstimateMs: Date.now() - chunkStartedAt,
               mimeType: event.data.type || mimeType || "audio/webm"
             });
-            await emitAudioBlob(event.data, chunkStartedAt, Date.now() - chunkStartedAt, true);
+            await queueAudioBlob(event.data, chunkStartedAt, Date.now() - chunkStartedAt, true);
             if (event.data.size) {
               console.info("[frontend] OpenAI STT chunk sent", {
                 byteLength: event.data.size,
@@ -711,6 +770,7 @@ export function useLiveTranscription() {
               return;
             }
             setIsRecording(false);
+            finishRequestedRecordingStop();
           };
 
           chunkRecorder.start();
@@ -733,30 +793,37 @@ export function useLiveTranscription() {
       setIsRecording(false);
       setError(getMicrophoneErrorMessage(recordingError));
     }
-  }, [clearLocalSessionState, clearStandaloneChunkTimer, role, session, startAudioLevelMeter, stopAudioLevelMeter, waitForConnectedSocket]);
+  }, [clearLocalSessionState, clearStandaloneChunkTimer, finishRequestedRecordingStop, role, session, startAudioLevelMeter, stopAudioLevelMeter, waitForConnectedSocket]);
 
   const stopRecording = useCallback(() => {
     console.info("[frontend] recording stopped by user", {
       sessionId: session?.id,
       mode: session && shouldUseStandaloneOpenAiChunks(session) ? "openai-chunked" : "streaming"
     });
-    standaloneChunkingRef.current = false;
-    clearStandaloneChunkTimer();
-    if (recorderRef.current?.state !== "inactive") {
-      if (!session || !shouldUseStandaloneOpenAiChunks(session)) {
-        recorderRef.current?.requestData();
+    return new Promise<void>((resolve) => {
+      requestedStopSessionIdRef.current = role === "broadcaster" ? session?.id ?? null : null;
+      stopCompletionRef.current = resolve;
+      stopFinalizingRef.current = false;
+      standaloneChunkingRef.current = false;
+      clearStandaloneChunkTimer();
+      const activeRecorder = recorderRef.current;
+      if (activeRecorder && activeRecorder.state !== "inactive") {
+        if (!session || !shouldUseStandaloneOpenAiChunks(session)) {
+          activeRecorder.requestData();
+        }
+        activeRecorder.stop();
+      } else {
+        finishRequestedRecordingStop();
       }
-      recorderRef.current?.stop();
-    }
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    stopAudioLevelMeter();
-    if (session) socketRef.current?.emit("audio:stop", { sessionId: session.id });
-    setIsRecording(false);
-    setConnectionMessage(session ? "Session ready. Microphone is stopped." : undefined);
-  }, [clearStandaloneChunkTimer, session, stopAudioLevelMeter]);
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopAudioLevelMeter();
+      setIsRecording(false);
+      setConnectionMessage(session ? "Session ready. Microphone is stopped." : undefined);
+    });
+  }, [clearStandaloneChunkTimer, finishRequestedRecordingStop, role, session, stopAudioLevelMeter]);
 
-  const leaveSession = useCallback(() => {
-    stopRecording();
+  const leaveSession = useCallback(async () => {
+    await stopRecording();
     if (session) socketRef.current?.emit("session:leave", { sessionId: session.id });
     socketRef.current?.disconnect();
     socketRef.current = null;
@@ -768,6 +835,7 @@ export function useLiveTranscription() {
     setRole(null);
     setHasBroadcasterToken(false);
     setSelectedSttProvider(null);
+    setWarning(null);
     credentialsRef.current = null;
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
     setConnectionState("idle");
@@ -816,6 +884,7 @@ export function useLiveTranscription() {
       lastDisplayUpdateAt,
       latencySamples,
       error,
+      warning,
       isRecording,
       audioLevel,
       role,
@@ -826,7 +895,8 @@ export function useLiveTranscription() {
       startRecording,
       stopRecording,
       leaveSession,
-      clearError: () => setError(null)
+      clearError: () => setError(null),
+      clearWarning: () => setWarning(null)
     }),
     [
       connectionState,
@@ -842,6 +912,7 @@ export function useLiveTranscription() {
       lastDisplayUpdateAt,
       latencySamples,
       error,
+      warning,
       isRecording,
       audioLevel,
       role,

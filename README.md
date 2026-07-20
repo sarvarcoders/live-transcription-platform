@@ -2,7 +2,7 @@
 
 Browser microphone capture, pluggable real-time STT, OpenAI translation, multi-screen live viewing, transcript history, and TXT/SRT export.
 
-Deepgram is the default speech-to-text provider. Google Cloud Speech-to-Text can be enabled as an optional provider/fallback, especially for Uzbek source speech. OpenAI `gpt-4o-mini` translates interim and final transcript segments when `OPENAI_API_KEY` is configured. If OpenAI is missing or fails, transcription keeps working and the UI shows a clear translation error.
+Deepgram streams English/Russian speech and OpenAI chunked STT handles Uzbek in automatic mode. A provider-independent sentence buffer commits stable phrases before OpenAI `gpt-4o-mini` translates them. If translation fails, transcription and microphone capture continue while the UI keeps the last successful subtitle visible.
 
 ## Features
 
@@ -12,7 +12,8 @@ Deepgram is the default speech-to-text provider. Google Cloud Speech-to-Text can
 - Deepgram streaming speech-to-text with interim and final transcripts
 - Optional Google Cloud Speech-to-Text provider for source speech
 - Experimental UzbekVoice chunked STT provider for Uzbek source speech
-- OpenAI `gpt-4o-mini` translation for interim and final transcript segments
+- Stable sentence/phrase buffering with punctuation, pause, duration, length, and stop-flush commits
+- Sequential OpenAI `gpt-4o-mini` translation for committed segments only
 - One broadcaster device streams microphone audio
 - Unlimited viewer devices can join with a session code
 - Viewers receive original and translated subtitles over Socket.io rooms
@@ -40,8 +41,9 @@ flowchart LR
   UzbekVoice -->|"chunked final transcripts"| STT
   Google -->|"interim/final transcripts"| STT
   OpenAISTT -->|"interim/final transcripts"| STT
-  STT -->|"normalized transcripts"| Server
-  Server -->|"interim/final transcript"| OpenAI["OpenAI<br/>gpt-4o-mini"]
+  STT -->|"stable transcript fragments"| Segmenter["Sentence / phrase<br/>segmenter"]
+  Segmenter -->|"committed segments"| Queue["Sequential translation<br/>queue"]
+  Queue -->|"one request at a time"| OpenAI["OpenAI<br/>gpt-4o-mini"]
   OpenAI -->|"translation"| Server
   Server -->|"original + translated subtitles"| Broadcaster["Broadcaster Screen"]
   Server -->|"room broadcast"| Viewers["Viewer Screens"]
@@ -95,13 +97,19 @@ UZBEKVOICE_STT_MODEL=general
 UZBEKVOICE_STT_CHUNK_MS=3000
 UZBEKVOICE_STT_BLOCKING=true
 UZBEKVOICE_STT_TIMEOUT_MS=10000
-INTERIM_TRANSLATION_ENABLED=true
+TRANSLATION_SEGMENT_MODE=stable
+TRANSLATION_COMMIT_ON_PUNCTUATION=true
+TRANSLATION_COMMIT_SILENCE_MS=900
+TRANSLATION_SEGMENT_MIN_CHARS=12
+TRANSLATION_SEGMENT_MAX_CHARS=140
+TRANSLATION_SEGMENT_MAX_DURATION_MS=7000
+TRANSLATION_FINAL_DEBOUNCE_MS=150
+INTERIM_TRANSLATION_ENABLED=false
 INTERIM_TRANSLATION_MIN_CHARS=8
 INTERIM_TRANSLATION_MIN_INTERVAL_MS=350
 INTERIM_TRANSLATION_STABILITY_MS=400
 SUBTITLE_MIN_DISPLAY_MS=1000
 SUBTITLE_MAX_CHARS=120
-FINAL_TRANSLATION_DEBOUNCE_MS=120
 OPENAI_TRANSLATION_TIMEOUT_MS=1800
 OPENAI_TRANSLATION_MAX_TOKENS=70
 RUNTIME_DEBUG_LOGS=false
@@ -146,13 +154,17 @@ Environment variable reference:
 - `UZBEKVOICE_STT_CHUNK_MS`: Audio chunk size sent to UzbekVoice. Default: `3000`.
 - `UZBEKVOICE_STT_BLOCKING`: Uses blocking upload for short chunks. Default: `true`.
 - `UZBEKVOICE_STT_TIMEOUT_MS`: Per-chunk UzbekVoice request timeout. Default: `10000`.
-- `INTERIM_TRANSLATION_ENABLED`: Enables speculative OpenAI translation for Deepgram interim transcripts. Default: `true`.
-- `INTERIM_TRANSLATION_MIN_CHARS`: Minimum stable interim transcript length before translation starts. Default: `8`.
-- `INTERIM_TRANSLATION_MIN_INTERVAL_MS`: Minimum time between interim translation requests per session. Default: `350`.
-- `INTERIM_TRANSLATION_STABILITY_MS`: How long interim text should stay unchanged before it is considered stable. Default: `400`.
-- `SUBTITLE_MIN_DISPLAY_MS`: Minimum time the center subtitle should remain visible before another interim subtitle replaces it. Default: `1000`.
-- `SUBTITLE_MAX_CHARS`: Maximum source phrase length sent for one interim subtitle chunk. Default: `120`.
-- `FINAL_TRANSLATION_DEBOUNCE_MS`: Short debounce before final transcript translation. Default: `120`.
+- `TRANSLATION_SEGMENT_MODE`: Translation timing mode. `stable` is the production default; `fast` is reserved for experimental interim behavior.
+- `TRANSLATION_COMMIT_ON_PUNCTUATION`: Commits a meaningful buffered phrase when it ends in sentence punctuation. Default: `true`.
+- `TRANSLATION_COMMIT_SILENCE_MS`: Transcript inactivity before a buffered phrase is committed. Default: `900`.
+- `TRANSLATION_SEGMENT_MIN_CHARS`: Minimum meaningful committed phrase length. Default: `12`.
+- `TRANSLATION_SEGMENT_MAX_CHARS`: Maximum target buffer length before a safe word/punctuation split. Default: `140`.
+- `TRANSLATION_SEGMENT_MAX_DURATION_MS`: Maximum time speech can remain buffered before commit. Default: `7000`.
+- `TRANSLATION_FINAL_DEBOUNCE_MS`: Short delay after punctuation or a Deepgram speech-final marker so adjacent final fragments can settle. Default: `150`.
+- `INTERIM_TRANSLATION_ENABLED`: Reserved compatibility switch. The production stable pipeline does not issue interim translation requests. Default: `false`.
+- `INTERIM_TRANSLATION_MIN_CHARS`, `INTERIM_TRANSLATION_MIN_INTERVAL_MS`, `INTERIM_TRANSLATION_STABILITY_MS`: Retained for configuration compatibility; they do not affect stable mode.
+- `SUBTITLE_MIN_DISPLAY_MS`: Minimum center-subtitle display hold. Default: `1000`.
+- `SUBTITLE_MAX_CHARS`: Legacy fast-mode phrase limit. Default: `120`.
 - `OPENAI_TRANSLATION_TIMEOUT_MS`: OpenAI request timeout in milliseconds. Default: `1800`.
 - `OPENAI_TRANSLATION_MAX_TOKENS`: Maximum tokens for streamed translations. Default: `70`.
 - `RUNTIME_DEBUG_LOGS`: Set to `true` only when debugging high-frequency Deepgram/audio events in production. Default: `false`.
@@ -174,7 +186,7 @@ The broadcaster UI also includes an advanced STT provider selector. The selected
 Auto-routing sends Uzbek source speech to OpenAI STT. The implemented mode is chunked audio transcription:
 
 ```text
-Browser audio chunks -> Socket.io -> server buffers short chunks -> /v1/audio/transcriptions -> transcript -> OpenAI translation
+Browser audio chunks -> Socket.io -> /v1/audio/transcriptions -> transcript fragment -> sentence buffer -> translation queue
 ```
 
 Use `OPENAI_STT_MODEL=gpt-4o-mini-transcribe` for this mode. Do not use `gpt-realtime-whisper` with `/v1/audio/transcriptions`; realtime models require the OpenAI Realtime transcription API/session. If a realtime model is configured in chunked mode, the app returns `OpenAI realtime STT requires Realtime API, not audio transcriptions endpoint`.
@@ -314,13 +326,19 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `UZBEKVOICE_STT_CHUNK_MS=3000`
    - `UZBEKVOICE_STT_BLOCKING=true`
    - `UZBEKVOICE_STT_TIMEOUT_MS=10000`
-   - `INTERIM_TRANSLATION_ENABLED=true`
+   - `TRANSLATION_SEGMENT_MODE=stable`
+   - `TRANSLATION_COMMIT_ON_PUNCTUATION=true`
+   - `TRANSLATION_COMMIT_SILENCE_MS=900`
+   - `TRANSLATION_SEGMENT_MIN_CHARS=12`
+   - `TRANSLATION_SEGMENT_MAX_CHARS=140`
+   - `TRANSLATION_SEGMENT_MAX_DURATION_MS=7000`
+   - `TRANSLATION_FINAL_DEBOUNCE_MS=150`
+   - `INTERIM_TRANSLATION_ENABLED=false`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
    - `INTERIM_TRANSLATION_STABILITY_MS=400`
    - `SUBTITLE_MIN_DISPLAY_MS=1000`
    - `SUBTITLE_MAX_CHARS=120`
-   - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Railway settings:
@@ -371,13 +389,19 @@ The production start command uses `process.env.PORT`, so it works with Railway a
    - `UZBEKVOICE_STT_CHUNK_MS=3000`
    - `UZBEKVOICE_STT_BLOCKING=true`
    - `UZBEKVOICE_STT_TIMEOUT_MS=10000`
-   - `INTERIM_TRANSLATION_ENABLED=true`
+   - `TRANSLATION_SEGMENT_MODE=stable`
+   - `TRANSLATION_COMMIT_ON_PUNCTUATION=true`
+   - `TRANSLATION_COMMIT_SILENCE_MS=900`
+   - `TRANSLATION_SEGMENT_MIN_CHARS=12`
+   - `TRANSLATION_SEGMENT_MAX_CHARS=140`
+   - `TRANSLATION_SEGMENT_MAX_DURATION_MS=7000`
+   - `TRANSLATION_FINAL_DEBOUNCE_MS=150`
+   - `INTERIM_TRANSLATION_ENABLED=false`
    - `INTERIM_TRANSLATION_MIN_CHARS=8`
    - `INTERIM_TRANSLATION_MIN_INTERVAL_MS=350`
    - `INTERIM_TRANSLATION_STABILITY_MS=400`
    - `SUBTITLE_MIN_DISPLAY_MS=1000`
    - `SUBTITLE_MAX_CHARS=120`
-   - `FINAL_TRANSLATION_DEBOUNCE_MS=120`
    - `OPENAI_TRANSLATION_TIMEOUT_MS=1800`
    - `OPENAI_TRANSLATION_MAX_TOKENS=70`
 5. Use these Render settings:
@@ -446,22 +470,23 @@ Creates a transcription session.
 
 Returns session metadata and recent final transcript segments.
 
-## Low-Latency Transcription
+## Stable Live Translation Pipeline
 
 - Browser audio is sent in 75 ms chunks.
 - Socket.io uses WebSocket with polling fallback and per-message compression disabled.
 - Deepgram model and endpointing are configurable; defaults are `DEEPGRAM_MODEL=nova-3` and `DEEPGRAM_ENDPOINTING_MS=60`.
-- Interim Deepgram transcripts pass through a stable-text detector before OpenAI translation.
-- Interim text is considered stable after repeated matching interim results or `INTERIM_TRANSLATION_STABILITY_MS`.
-- Stable interim text is segmented into readable phrase chunks using punctuation, word count, and `SUBTITLE_MAX_CHARS`.
-- Interim translation requests are throttled with `INTERIM_TRANSLATION_MIN_INTERVAL_MS` and skipped until `INTERIM_TRANSLATION_MIN_CHARS` is reached.
-- The center subtitle keeps the last successful translation visible for at least `SUBTITLE_MIN_DISPLAY_MS` unless a final transcript arrives.
-- Stale interim OpenAI responses are ignored if a newer interim transcript has already arrived.
-- Final transcripts are stored in session history and replayed to new viewers.
-- Final transcripts replace speculative interim translations and are stored/exported after OpenAI translation completes.
-- OpenAI errors do not stop the session or microphone stream.
+- Deepgram interim results are available for live listening state but are not sent to OpenAI in stable mode.
+- Deepgram final fragments and OpenAI chunked STT results enter the same provider-independent transcript buffer.
+- Common word overlap and repeated chunk transcripts are deduplicated before buffering.
+- Segments commit on punctuation, Deepgram speech-final, 900 ms transcript silence, 7 seconds, 140 characters, or an explicit stop flush.
+- Only committed segments enter a bounded FIFO translation queue, with one OpenAI request active per session.
+- Temporary timeout/5xx translation failures retry once; permanent failures remain non-blocking and the next queued segment continues.
+- The center subtitle keeps the last successful translation visible while speech is buffered or a newer translation is pending.
+- Only successfully translated committed segments are stored, replayed to viewers, and included in TXT/SRT exports.
+- Stopping the microphone waits for the final browser audio blob to be sent, flushes meaningful buffered text, and does not cancel queued translation work.
+- STT chunk or OpenAI translation errors do not stop the microphone stream.
 
-The sub-second target depends on microphone/browser scheduling, network distance to Deepgram, language/model availability, and hosting location.
+Stable mode intentionally trades a small amount of delay for sentence context and readable subtitles. Uzbek OpenAI chunked STT also includes the configured audio-chunk duration before transcription begins.
 
 ## Latency Dashboard
 
@@ -494,6 +519,7 @@ The live dashboard tracks rolling averages, latest samples, and p95 values for:
 ## Validation
 
 ```bash
+npm test
 npm run typecheck
 npm run lint
 npm run build

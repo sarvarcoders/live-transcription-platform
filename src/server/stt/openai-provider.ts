@@ -11,6 +11,7 @@ import type { SttAudioChunkMetadata, SttStream, SttStreamOptions } from "./types
 import { SttProviderError } from "./types";
 
 const RECENT_TRANSCRIPT_CACHE_LIMIT = 20;
+const MAX_PENDING_OPENAI_CHUNKS = 8;
 const AUDIO_TRANSCRIPTION_MODELS = new Set(["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]);
 const execFileAsync = promisify(execFile);
 
@@ -105,15 +106,14 @@ function extractOpenAiErrorDetails(error: unknown) {
     type?: string;
     message?: string;
     error?: { message?: string; code?: string; type?: string };
-    response?: { status?: number; data?: unknown };
+    response?: { status?: number };
   };
 
   return {
     status: candidate.status ?? candidate.response?.status,
     code: candidate.code ?? candidate.error?.code,
     type: candidate.type ?? candidate.error?.type,
-    message: candidate.error?.message ?? candidate.message ?? String(error),
-    body: candidate.response?.data
+    message: candidate.error?.message ?? candidate.message ?? String(error)
   };
 }
 
@@ -132,10 +132,11 @@ export class OpenAiSttStream implements SttStream {
   readonly provider = "openai" as const;
   private currentBuffers: Buffer[] = [];
   private currentDurationEstimateMs = 0;
-  private queuedChunk: PendingOpenAiChunk | null = null;
+  private pendingChunks: PendingOpenAiChunk[] = [];
   private flushTimer: NodeJS.Timeout | null = null;
   private requestActive = false;
-  private stopped = false;
+  private stopRequested = false;
+  private closed = false;
   private recentTranscripts: string[] = [];
 
   constructor(private readonly options: SttStreamOptions) {}
@@ -173,7 +174,7 @@ export class OpenAiSttStream implements SttStream {
   }
 
   send(audio: Buffer, metadata?: SttAudioChunkMetadata) {
-    if (this.stopped || audio.byteLength === 0) return;
+    if (this.stopRequested || this.closed || audio.byteLength === 0) return;
     debugInfo("[stt:openai] audio chunk received", {
       sessionId: this.options.sessionId,
       incomingMimeType: this.options.mimeType,
@@ -193,13 +194,12 @@ export class OpenAiSttStream implements SttStream {
   }
 
   stop() {
-    this.stopped = true;
+    if (this.closed || this.stopRequested) return;
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
-    this.currentBuffers = [];
-    this.currentDurationEstimateMs = 0;
-    this.queuedChunk = null;
-    this.options.onClose();
+    this.flushCurrentBuffers();
+    this.stopRequested = true;
+    if (!this.requestActive && this.pendingChunks.length === 0) this.finishClose();
   }
 
   private ensureFlushTimer() {
@@ -223,14 +223,27 @@ export class OpenAiSttStream implements SttStream {
 
   private enqueueOrTranscribe(chunk: PendingOpenAiChunk) {
     if (this.requestActive) {
-      if (this.queuedChunk) {
-        debugInfo("[stt:openai] dropping older queued chunk", {
+      if (this.pendingChunks.length >= MAX_PENDING_OPENAI_CHUNKS) {
+        const droppedChunk = this.pendingChunks.shift();
+        console.warn("[stt:openai] STT backlog full; older chunk skipped", {
           sessionId: this.options.sessionId,
-          droppedByteLength: Buffer.concat(this.queuedChunk.buffers).byteLength,
-          nextByteLength: Buffer.concat(chunk.buffers).byteLength
+          droppedByteLength: droppedChunk ? Buffer.concat(droppedChunk.buffers).byteLength : 0,
+          queueLimit: MAX_PENDING_OPENAI_CHUNKS
         });
+        this.options.onRecoverableError?.(
+          new SttProviderError(
+            this.provider,
+            "OPENAI_STT_BACKLOG",
+            "OpenAI STT is temporarily behind. One older audio chunk was skipped; recording continues."
+          )
+        );
       }
-      this.queuedChunk = chunk;
+      this.pendingChunks.push(chunk);
+      debugInfo("[stt:openai] audio chunk queued", {
+        sessionId: this.options.sessionId,
+        queuedChunkCount: this.pendingChunks.length,
+        byteLength: Buffer.concat(chunk.buffers).byteLength
+      });
       return;
     }
 
@@ -241,7 +254,7 @@ export class OpenAiSttStream implements SttStream {
     const env = getServerEnv();
     validateChunkedTranscriptionModel(env.OPENAI_STT_MODEL);
     const audio = Buffer.concat(chunk.buffers);
-    if (audio.byteLength === 0 || this.stopped) return;
+    if (audio.byteLength === 0 || this.closed) return;
     if (audio.byteLength < env.OPENAI_STT_MIN_BYTES) {
       debugInfo("[stt:openai] chunk skipped below minimum byte threshold", {
         sessionId: this.options.sessionId,
@@ -318,6 +331,8 @@ export class OpenAiSttStream implements SttStream {
       });
     } catch (error) {
       if (isUnsupportedLanguageCodeError(error)) {
+        this.stopRequested = true;
+        this.pendingChunks = [];
         this.options.onError(createLanguageUnsupportedError());
         return;
       }
@@ -328,8 +343,7 @@ export class OpenAiSttStream implements SttStream {
         status: details.status,
         code: details.code,
         type: details.type,
-        message: details.message,
-        body: details.body
+        message: details.message
       });
 
       if (
@@ -341,18 +355,47 @@ export class OpenAiSttStream implements SttStream {
             ? error
             : new SttProviderError(this.provider, "OPENAI_STT_CHUNK_FAILED", `OpenAI STT failed: ${details.message}`)
         );
+        console.info("[stt:openai] chunk failure skipped; recording continues", {
+          sessionId: this.options.sessionId,
+          status: details.status,
+          code: details.code
+        });
         return;
       }
 
-      this.options.onError(error instanceof Error ? error : new Error(String(error)));
+      if (details.status === 401 || details.status === 403) {
+        this.stopRequested = true;
+        this.pendingChunks = [];
+        this.options.onError(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+
+      this.options.onRecoverableError?.(
+        new SttProviderError(this.provider, "OPENAI_STT_CHUNK_FAILED", `OpenAI STT failed: ${details.message}`)
+      );
+      console.info("[stt:openai] chunk failure skipped; recording continues", {
+        sessionId: this.options.sessionId,
+        status: details.status,
+        code: details.code
+      });
     } finally {
       this.requestActive = false;
-      if (!this.stopped && this.queuedChunk) {
-        const queued = this.queuedChunk;
-        this.queuedChunk = null;
+      const queued = this.pendingChunks.shift();
+      if (queued) {
         void this.transcribeChunk(queued);
+      } else if (this.stopRequested) {
+        this.finishClose();
       }
     }
+  }
+
+  private finishClose() {
+    if (this.closed) return;
+    this.closed = true;
+    this.currentBuffers = [];
+    this.currentDurationEstimateMs = 0;
+    this.pendingChunks = [];
+    this.options.onClose();
   }
 
   private async prepareAudioUpload(audio: Buffer, startedAt: number): Promise<PreparedAudioUpload> {

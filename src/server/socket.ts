@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Server, Socket } from "socket.io";
+import type { LanguageCode } from "@/shared/languages";
 import type {
   ActiveSttProvider,
   ClientToServerEvents,
@@ -14,28 +15,40 @@ import { sessionStore } from "./sessions";
 import { getServerEnv } from "./env";
 import { debugInfo } from "./logger";
 import { canFallbackToDeepgram, classifySttError, createSttStream, selectSttProvider, type SttStream, type SttTranscript } from "./stt";
-import { classifyTranslationError, normalizeTranscriptText, streamTranslateTranscript } from "./translator";
+import {
+  TranscriptSegmenter,
+  type CommittedTranscriptSegment,
+  type SegmentCommitReason
+} from "./transcript-segmenter";
+import { classifyTranslationError, streamTranslateTranscript } from "./translator";
 
 type TranslationServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type TranslationSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
-type InterimTranslationState = {
-  requestId: number;
-  text: string;
-  lastRequestedAt: number;
-  lastRawText?: string;
-  repeatedCount: number;
-  stabilityTimer?: NodeJS.Timeout;
+type TranslationQueueItem = {
+  sequenceId: number;
+  commitReason: SegmentCommitReason;
+  segment: TranscriptSegment;
+};
+type TranslationQueueState = {
+  active: boolean;
+  items: TranslationQueueItem[];
+  queuedSegmentIds: Set<string>;
+  latestCompletedSequenceId: number;
 };
 
 const DEFAULT_NO_AUDIO_TIMEOUT_MS = 3000;
 const OPENAI_CHUNKED_NO_AUDIO_TIMEOUT_MS = 15000;
+const MAX_TRANSLATION_QUEUE_ITEMS = 200;
 
 const activeStreams = new Map<string, SttStream>();
 const audioChunkStatsBySession = new Map<string, { count: number; totalBytes: number; lastChunkAt?: number }>();
 const noAudioTimersBySession = new Map<string, NodeJS.Timeout>();
 const lastAudioTimingBySession = new Map<string, { capturedAt: number; sentAt: number; audioReceivedAt: number }>();
-const interimTranslationStateBySession = new Map<string, InterimTranslationState>();
-const finalTranslationTimersBySession = new Map<string, Set<NodeJS.Timeout>>();
+const transcriptSegmentersBySession = new Map<string, TranscriptSegmenter>();
+const segmenterCleanupTimersBySession = new Map<string, NodeJS.Timeout>();
+const stoppingSessions = new Set<string>();
+const streamsPendingFinalFlush = new WeakSet<SttStream>();
+const translationQueuesBySession = new Map<string, TranslationQueueState>();
 
 function roomName(sessionId: string) {
   return `session:${sessionId}`;
@@ -113,24 +126,11 @@ function resetNoAudioTimer(socket: TranslationSocket, sessionId: string, provide
   });
 }
 
-function clearInterimStabilityTimer(sessionId: string) {
-  const state = interimTranslationStateBySession.get(sessionId);
-  if (state?.stabilityTimer) clearTimeout(state.stabilityTimer);
-  if (state) {
-    interimTranslationStateBySession.set(sessionId, {
-      ...state,
-      stabilityTimer: undefined
-    });
-  }
-}
-
 function resetAudioState(sessionId: string) {
   activeStreams.delete(sessionId);
   audioChunkStatsBySession.delete(sessionId);
   clearNoAudioTimer(sessionId);
   lastAudioTimingBySession.delete(sessionId);
-  clearInterimStabilityTimer(sessionId);
-  interimTranslationStateBySession.delete(sessionId);
 }
 
 function baseMetrics(sessionId: string, deepgramReceivedAt: number): LatencyMetrics {
@@ -159,232 +159,112 @@ function getPreviousTranslationContext(sessionId: string, currentSegmentId: stri
     : {};
 }
 
-function countWords(text: string) {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
-function segmentTranscriptPhrase(text: string, maxChars: number) {
-  const normalizedText = normalizeTranscriptText(text);
-  if (normalizedText.length <= maxChars && countWords(normalizedText) <= 12) return normalizedText;
-
-  const punctuationMatches = [...normalizedText.matchAll(/[.!?;:,]/g)]
-    .map((match) => match.index ?? -1)
-    .filter((index) => index >= 20 && index < maxChars);
-  const punctuationCut = punctuationMatches.at(-1);
-  if (punctuationCut) return normalizedText.slice(0, punctuationCut + 1).trim();
-
-  const words = normalizedText.split(/\s+/).filter(Boolean);
-  if (words.length > 12) {
-    const firstTwelveWords = words.slice(0, 12).join(" ");
-    if (firstTwelveWords.length <= maxChars) return firstTwelveWords;
-  }
-
-  const safeCut = normalizedText.lastIndexOf(" ", maxChars);
-  if (safeCut >= 20) return normalizedText.slice(0, safeCut).trim();
-  return normalizedText.slice(0, maxChars).trim();
-}
-
-function requestInterimTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment, candidateText: string) {
-  const env = getServerEnv();
-  if (!env.INTERIM_TRANSLATION_ENABLED) return;
-
-  const normalizedText = segmentTranscriptPhrase(candidateText, env.SUBTITLE_MAX_CHARS);
-  if (normalizedText.length < env.INTERIM_TRANSLATION_MIN_CHARS) return;
-
-  const currentState = interimTranslationStateBySession.get(sessionId);
-  const now = Date.now();
-  if (currentState?.text === normalizedText) return;
-  if (currentState && now - currentState.lastRequestedAt < env.INTERIM_TRANSLATION_MIN_INTERVAL_MS) {
-    clearInterimStabilityTimer(sessionId);
-    const delay = env.INTERIM_TRANSLATION_MIN_INTERVAL_MS - (now - currentState.lastRequestedAt);
-    const timer = setTimeout(() => requestInterimTranslation(io, sessionId, segment, normalizedText), delay);
-    interimTranslationStateBySession.set(sessionId, {
-      ...currentState,
-      stabilityTimer: timer
-    });
-    return;
-  }
-
-  const requestId = (currentState?.requestId ?? 0) + 1;
-  interimTranslationStateBySession.set(sessionId, {
-    ...currentState,
-    requestId,
-    text: normalizedText,
-    lastRequestedAt: now,
-    repeatedCount: currentState?.repeatedCount ?? 0,
-    stabilityTimer: undefined
-  });
-
-  const translationStartedAt = Date.now();
-  let firstTokenAt: number | undefined;
-
-  streamTranslateTranscript({
-    text: normalizedText,
-    sourceLanguage: segment.sourceLanguage,
-    targetLanguage: segment.targetLanguage,
-    ...getPreviousTranslationContext(sessionId, segment.id),
-    onFirstToken: () => {
-      firstTokenAt = Date.now();
-    },
-    onToken: (partialText) => {
-      const latestState = interimTranslationStateBySession.get(sessionId);
-      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
-
-      emitSegment(io, sessionId, {
-        ...segment,
-        text: normalizedText,
-        translatedText: partialText,
-        translationStatus: "pending",
-        metrics: {
-          ...segment.metrics,
-          translationStartedAt,
-          firstTokenAt,
-          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined
-        }
-      });
-    }
-  })
-    .then((translatedText) => {
-      const latestState = interimTranslationStateBySession.get(sessionId);
-      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
-
-      const translationCompletedAt = Date.now();
-      console.info("[socket] translation received", {
-        sessionId,
-        segmentId: segment.id,
-        isFinal: false,
-        textLength: translatedText.length
-      });
-      clearNoAudioTimer(sessionId);
-      emitSegment(io, sessionId, {
-        ...segment,
-        text: normalizedText,
-        translatedText,
-        translationStatus: "pending",
-        metrics: {
-          ...segment.metrics,
-          translationStartedAt,
-          firstTokenAt,
-          translationCompletedAt,
-          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined,
-          openaiTotalLatencyMs: translationCompletedAt - translationStartedAt
-        }
-      });
-    })
-    .catch((error: unknown) => {
-      const latestState = interimTranslationStateBySession.get(sessionId);
-      if (latestState?.requestId !== requestId || latestState.text !== normalizedText) return;
-
-      const classifiedError = classifyTranslationError(error);
-      console.warn("[socket] interim translation failed", {
-        sessionId,
-        code: classifiedError.code,
-        message: classifiedError.message
-      });
-      emitSegment(io, sessionId, {
-        ...segment,
-        translationStatus: "error",
-        metrics: {
-          ...segment.metrics,
-          translationStartedAt
-        }
-      });
-      io.to(roomName(sessionId)).emit("server:error", {
-        code: classifiedError.code,
-        message: classifiedError.message
-      });
-    });
-}
-
-function scheduleInterimTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
-  const env = getServerEnv();
-  if (!env.INTERIM_TRANSLATION_ENABLED) return;
-
-  const rawText = normalizeTranscriptText(segment.text);
-  if (rawText.length < env.INTERIM_TRANSLATION_MIN_CHARS) return;
-
-  const currentState = interimTranslationStateBySession.get(sessionId);
-  const repeatedCount = currentState?.lastRawText === rawText ? currentState.repeatedCount + 1 : 1;
-  const nextState: InterimTranslationState = {
-    requestId: currentState?.requestId ?? 0,
-    text: currentState?.text ?? "",
-    lastRequestedAt: currentState?.lastRequestedAt ?? 0,
-    lastRawText: rawText,
-    repeatedCount
+function getTranslationQueue(sessionId: string) {
+  const existing = translationQueuesBySession.get(sessionId);
+  if (existing) return existing;
+  const created: TranslationQueueState = {
+    active: false,
+    items: [],
+    queuedSegmentIds: new Set<string>(),
+    latestCompletedSequenceId: 0
   };
+  translationQueuesBySession.set(sessionId, created);
+  return created;
+}
 
-  if (currentState?.stabilityTimer) clearTimeout(currentState.stabilityTimer);
+function isRetryableTranslationError(error: unknown) {
+  const candidate = error as { status?: number; code?: string; message?: string };
+  const status = Number(candidate?.status);
+  if ([400, 401, 403, 429].includes(status)) return false;
+  if (status === 408 || status === 409 || status === 425 || status >= 500) return true;
+  const message = (candidate?.message ?? String(error)).toLowerCase();
+  return message.includes("timeout") || message.includes("timed out") || message.includes("connection reset");
+}
 
-  if (repeatedCount >= 2) {
-    interimTranslationStateBySession.set(sessionId, nextState);
-    requestInterimTranslation(io, sessionId, segment, rawText);
+async function translateQueueItem(sessionId: string, item: TranslationQueueItem) {
+  let firstTokenAt: number | undefined;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const translatedText = await streamTranslateTranscript({
+        text: item.segment.text,
+        sourceLanguage: item.segment.sourceLanguage,
+        targetLanguage: item.segment.targetLanguage,
+        ...getPreviousTranslationContext(sessionId, item.segment.id),
+        onFirstToken: () => {
+          firstTokenAt ??= Date.now();
+        },
+        onToken: () => {
+          // Stable mode waits for the complete translation before updating subtitles.
+        }
+      });
+      return { translatedText, firstTokenAt };
+    } catch (error) {
+      lastError = error;
+      if (attempt > 0 || !isRetryableTranslationError(error)) break;
+      console.warn("[translation] temporary failure; retrying once", {
+        sessionId,
+        segmentId: item.segment.id,
+        sequenceId: item.sequenceId
+      });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
+
+  throw lastError;
+}
+
+function processTranslationQueue(io: TranslationServer, sessionId: string) {
+  const queue = getTranslationQueue(sessionId);
+  if (queue.active) return;
+  const item = queue.items.shift();
+  if (!item) {
+    translationQueuesBySession.delete(sessionId);
     return;
   }
 
-  const stabilityTimer = setTimeout(() => {
-    const latestState = interimTranslationStateBySession.get(sessionId);
-    if (latestState?.lastRawText !== rawText) return;
-    requestInterimTranslation(io, sessionId, segment, rawText);
-  }, env.INTERIM_TRANSLATION_STABILITY_MS);
-
-  interimTranslationStateBySession.set(sessionId, {
-    ...nextState,
-    stabilityTimer
-  });
-}
-
-function translateFinalSegment(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
-  const currentState = interimTranslationStateBySession.get(sessionId);
-  if (currentState?.stabilityTimer) clearTimeout(currentState.stabilityTimer);
-  interimTranslationStateBySession.set(sessionId, {
-    ...currentState,
-    requestId: (currentState?.requestId ?? 0) + 1,
-    text: normalizeTranscriptText(segment.text),
-    lastRequestedAt: 0,
-    repeatedCount: currentState?.repeatedCount ?? 0,
-    stabilityTimer: undefined
-  });
-
+  queue.active = true;
   const translationStartedAt = Date.now();
-  let firstTokenAt: number | undefined;
-
-  streamTranslateTranscript({
-    text: segment.text,
-    sourceLanguage: segment.sourceLanguage,
-    targetLanguage: segment.targetLanguage,
-    ...getPreviousTranslationContext(sessionId, segment.id),
-    onFirstToken: () => {
-      firstTokenAt = Date.now();
-    },
-    onToken: (partialText) => {
-      emitSegment(io, sessionId, {
-        ...segment,
-        translatedText: partialText,
-        translationStatus: "pending",
-        metrics: {
-          ...segment.metrics,
-          translationStartedAt,
-          firstTokenAt,
-          openaiFirstTokenLatencyMs: firstTokenAt ? firstTokenAt - translationStartedAt : undefined
-        }
-      });
+  console.info("[translation] started", {
+    sessionId,
+    segmentId: item.segment.id,
+    sequenceId: item.sequenceId,
+    commitReason: item.commitReason,
+    queuedRemaining: queue.items.length
+  });
+  emitSegment(io, sessionId, {
+    ...item.segment,
+    isFinal: false,
+    translationStatus: "pending",
+    metrics: {
+      ...item.segment.metrics,
+      translationStartedAt
     }
-  })
-    .then((translatedText) => {
+  });
+
+  void translateQueueItem(sessionId, item)
+    .then(({ translatedText, firstTokenAt }) => {
+      if (item.sequenceId < queue.latestCompletedSequenceId) {
+        debugInfo("[translation] stale response ignored", {
+          sessionId,
+          segmentId: item.segment.id,
+          sequenceId: item.sequenceId,
+          latestCompletedSequenceId: queue.latestCompletedSequenceId
+        });
+        return;
+      }
+
       const translationCompletedAt = Date.now();
-      console.info("[socket] translation received", {
-        sessionId,
-        segmentId: segment.id,
-        isFinal: true,
-        textLength: translatedText.length
-      });
-      clearNoAudioTimer(sessionId);
+      queue.latestCompletedSequenceId = item.sequenceId;
       const translatedSegment: TranscriptSegment = {
-        ...segment,
+        ...item.segment,
         translatedText,
+        isFinal: true,
         translationStatus: "complete",
+        completedAt: new Date(translationCompletedAt).toISOString(),
         metrics: {
-          ...segment.metrics,
+          ...item.segment.metrics,
           translationStartedAt,
           firstTokenAt,
           translationCompletedAt,
@@ -394,50 +274,193 @@ function translateFinalSegment(io: TranslationServer, sessionId: string, segment
       };
       sessionStore.addTranscript(sessionId, translatedSegment);
       emitSegment(io, sessionId, translatedSegment);
+      clearNoAudioTimer(sessionId);
+      console.info("[translation] completed", {
+        sessionId,
+        segmentId: item.segment.id,
+        sequenceId: item.sequenceId,
+        textLength: translatedText.length,
+        latencyMs: translationCompletedAt - translationStartedAt,
+        microphoneContinues: !stoppingSessions.has(sessionId)
+      });
     })
     .catch((error: unknown) => {
       const classifiedError = classifyTranslationError(error);
-      const failedSegment: TranscriptSegment = {
-        ...segment,
-        translationStatus: "error",
-        metrics: {
-          ...segment.metrics,
-          translationStartedAt
-        }
-      };
-      console.warn("[socket] translation failed", {
+      console.warn("[translation] failed; microphone and queue continue", {
         sessionId,
+        segmentId: item.segment.id,
+        sequenceId: item.sequenceId,
         code: classifiedError.code,
         message: classifiedError.message
       });
-      sessionStore.addTranscript(sessionId, failedSegment);
-      emitSegment(io, sessionId, failedSegment);
+      emitSegment(io, sessionId, {
+        ...item.segment,
+        isFinal: false,
+        translationStatus: "error",
+        metrics: {
+          ...item.segment.metrics,
+          translationStartedAt
+        }
+      });
       io.to(roomName(sessionId)).emit("server:error", {
         code: classifiedError.code,
         message: classifiedError.message
       });
+    })
+    .finally(() => {
+      queue.active = false;
+      queue.queuedSegmentIds.delete(item.segment.id);
+      processTranslationQueue(io, sessionId);
     });
 }
 
-function scheduleFinalTranslation(io: TranslationServer, sessionId: string, segment: TranscriptSegment) {
-  const debounceMs = getServerEnv().FINAL_TRANSLATION_DEBOUNCE_MS;
-  const run = () => translateFinalSegment(io, sessionId, segment);
+function queueCommittedSegment(
+  io: TranslationServer,
+  sessionId: string,
+  sourceLanguage: LanguageCode,
+  targetLanguage: LanguageCode,
+  committed: CommittedTranscriptSegment
+) {
+  const segmentId = randomUUID();
+  const queue = getTranslationQueue(sessionId);
+  if (queue.queuedSegmentIds.has(segmentId)) return;
 
-  if (debounceMs <= 0) {
-    run();
-    return;
+  const segment: TranscriptSegment = {
+    id: segmentId,
+    sessionId,
+    text: committed.text,
+    sourceLanguage,
+    targetLanguage,
+    sttProvider: committed.provider,
+    isFinal: true,
+    translationStatus: "pending",
+    confidence: committed.confidence,
+    startedAt: committed.startedAt,
+    completedAt: committed.completedAt,
+    metrics: committed.metrics
+  };
+
+  if (queue.items.length >= MAX_TRANSLATION_QUEUE_ITEMS) {
+    const tail = queue.items.at(-1);
+    if (tail) {
+      tail.segment.text = `${tail.segment.text} ${segment.text}`.replace(/\s+/g, " ").trim();
+      tail.segment.completedAt = segment.completedAt;
+      console.warn("[translation] queue limit reached; committed segments merged", {
+        sessionId,
+        queueLimit: MAX_TRANSLATION_QUEUE_ITEMS,
+        mergedIntoSegmentId: tail.segment.id,
+        appendedSequenceId: committed.sequenceId
+      });
+      return;
+    }
   }
 
-  const timer = setTimeout(() => {
-    const timersForSession = finalTranslationTimersBySession.get(sessionId);
-    timersForSession?.delete(timer);
-    if (timersForSession?.size === 0) finalTranslationTimersBySession.delete(sessionId);
-    run();
-  }, debounceMs);
+  queue.items.push({
+    sequenceId: committed.sequenceId,
+    commitReason: committed.reason,
+    segment
+  });
+  queue.queuedSegmentIds.add(segmentId);
+  console.info("[translation] queued", {
+    sessionId,
+    segmentId,
+    sequenceId: committed.sequenceId,
+    commitReason: committed.reason,
+    queueLength: queue.items.length
+  });
+  processTranslationQueue(io, sessionId);
+}
 
-  const timers = finalTranslationTimersBySession.get(sessionId) ?? new Set<NodeJS.Timeout>();
-  timers.add(timer);
-  finalTranslationTimersBySession.set(sessionId, timers);
+function clearSegmenterCleanupTimer(sessionId: string) {
+  const timer = segmenterCleanupTimersBySession.get(sessionId);
+  if (timer) clearTimeout(timer);
+  segmenterCleanupTimersBySession.delete(sessionId);
+}
+
+function createSessionSegmenter(
+  io: TranslationServer,
+  sessionId: string,
+  sourceLanguage: LanguageCode,
+  targetLanguage: LanguageCode
+) {
+  clearSegmenterCleanupTimer(sessionId);
+  const previousSegmenter = transcriptSegmentersBySession.get(sessionId);
+  if (previousSegmenter) {
+    flushSpecificSegmenter(sessionId, previousSegmenter, "stop_flush");
+    previousSegmenter.dispose();
+  }
+  const env = getServerEnv();
+  const segmenter = new TranscriptSegmenter(
+    {
+      commitOnPunctuation: env.TRANSLATION_COMMIT_ON_PUNCTUATION,
+      silenceMs: env.TRANSLATION_COMMIT_SILENCE_MS,
+      minChars: env.TRANSLATION_SEGMENT_MIN_CHARS,
+      maxChars: env.TRANSLATION_SEGMENT_MAX_CHARS,
+      maxDurationMs: env.TRANSLATION_SEGMENT_MAX_DURATION_MS,
+      finalDebounceMs: env.TRANSLATION_FINAL_DEBOUNCE_MS
+    },
+    (committed) => {
+      clearNoAudioTimer(sessionId);
+      console.info("[segmenter] segment committed", {
+        sessionId,
+        sequenceId: committed.sequenceId,
+        reason: committed.reason,
+        textLength: committed.text.length
+      });
+      queueCommittedSegment(io, sessionId, sourceLanguage, targetLanguage, committed);
+    }
+  );
+  transcriptSegmentersBySession.set(sessionId, segmenter);
+  console.info("[segmenter] stable sentence mode started", {
+    sessionId,
+    mode: env.TRANSLATION_SEGMENT_MODE,
+    interimTranslationEnabled: env.INTERIM_TRANSLATION_ENABLED,
+    silenceMs: env.TRANSLATION_COMMIT_SILENCE_MS,
+    minChars: env.TRANSLATION_SEGMENT_MIN_CHARS,
+    maxChars: env.TRANSLATION_SEGMENT_MAX_CHARS,
+    maxDurationMs: env.TRANSLATION_SEGMENT_MAX_DURATION_MS,
+    finalDebounceMs: env.TRANSLATION_FINAL_DEBOUNCE_MS
+  });
+  return segmenter;
+}
+
+function flushTranscriptBuffer(sessionId: string, reason: SegmentCommitReason = "stop_flush") {
+  const segmenter = transcriptSegmentersBySession.get(sessionId);
+  if (!segmenter) return;
+  flushSpecificSegmenter(sessionId, segmenter, reason);
+}
+
+function flushSpecificSegmenter(
+  sessionId: string,
+  segmenter: TranscriptSegmenter,
+  reason: SegmentCommitReason = "stop_flush"
+) {
+  const bufferLength = segmenter.currentTranscriptBuffer.length;
+  const committedText = segmenter.flush(reason);
+  console.info("[segmenter] remaining buffer flushed", {
+    sessionId,
+    reason,
+    bufferLength,
+    committed: Boolean(committedText)
+  });
+}
+
+function disposeSessionSegmenter(sessionId: string) {
+  clearSegmenterCleanupTimer(sessionId);
+  transcriptSegmentersBySession.get(sessionId)?.dispose();
+  transcriptSegmentersBySession.delete(sessionId);
+  stoppingSessions.delete(sessionId);
+}
+
+function scheduleSegmenterCleanup(sessionId: string) {
+  clearSegmenterCleanupTimer(sessionId);
+  const cleanupDelayMs = Math.max(60000, getServerEnv().OPENAI_STT_TIMEOUT_MS + 2000);
+  const timer = setTimeout(() => {
+    segmenterCleanupTimersBySession.delete(sessionId);
+    flushTranscriptBuffer(sessionId, "stop_flush");
+    disposeSessionSegmenter(sessionId);
+  }, cleanupDelayMs);
+  segmenterCleanupTimersBySession.set(sessionId, timer);
 }
 
 function getProviderLabel(provider: ActiveSttProvider) {
@@ -523,8 +546,14 @@ export function registerSocketHandlers(io: TranslationServer) {
         return;
       }
 
-      activeStreams.get(sessionId)?.stop();
+      const previousStream = activeStreams.get(sessionId);
+      if (previousStream) {
+        streamsPendingFinalFlush.add(previousStream);
+        previousStream.stop();
+      }
       resetAudioState(sessionId);
+      stoppingSessions.delete(sessionId);
+      clearSegmenterCleanupTimer(sessionId);
 
       const env = getServerEnv();
       const requestedProvider = liveSession.sttProvider ?? getServerEnv().STT_PROVIDER;
@@ -547,6 +576,12 @@ export function registerSocketHandlers(io: TranslationServer) {
           selection.provider === "deepgram" && (liveSession.sourceLanguage === "en" || liveSession.sourceLanguage === "ru")
       });
       let fallbackUsed = false;
+      const segmenter = createSessionSegmenter(
+        io,
+        sessionId,
+        liveSession.sourceLanguage,
+        liveSession.targetLanguage
+      );
 
       const handleTranscript = (transcript: SttTranscript) => {
         const sttReceivedAt = Date.now();
@@ -554,43 +589,64 @@ export function registerSocketHandlers(io: TranslationServer) {
           sessionId,
           provider: transcript.provider,
           isFinal: transcript.isFinal,
+          speechFinal: transcript.speechFinal,
           textLength: transcript.text.length,
           confidence: transcript.confidence
         });
 
-        const segment: TranscriptSegment = {
-          id: transcript.isFinal ? randomUUID() : `interim:${sessionId}`,
-          sessionId,
-          text: transcript.text,
-          sourceLanguage: liveSession.sourceLanguage,
-          targetLanguage: liveSession.targetLanguage,
-          isFinal: transcript.isFinal,
-          sttProvider: transcript.provider,
-          translationStatus: transcript.isFinal ? "pending" : undefined,
-          confidence: transcript.confidence,
-          startedAt: new Date().toISOString(),
-          completedAt: transcript.isFinal ? new Date().toISOString() : undefined,
-          metrics: baseMetrics(sessionId, sttReceivedAt)
-        };
+        const metrics = baseMetrics(sessionId, sttReceivedAt);
 
         if (transcript.isFinal) {
-          console.info("[stt] final transcript received", {
+          const appendResult = segmenter.append({
+            text: transcript.text,
+            provider: transcript.provider,
+            confidence: transcript.confidence,
+            receivedAt: sttReceivedAt,
+            speechFinal: transcript.speechFinal,
+            metrics
+          });
+          console.info("[segmenter] transcript fragment received", {
             sessionId,
             provider: transcript.provider,
-            textLength: transcript.text.length
+            fragmentLength: transcript.text.length,
+            disposition: appendResult.disposition,
+            currentBufferLength: appendResult.currentBufferLength,
+            speechFinal: transcript.speechFinal
           });
-          sessionStore.addTranscript(sessionId, segment);
-          scheduleFinalTranslation(io, sessionId, segment);
+
+          if (appendResult.currentBufferLength > 0) {
+            emitSegment(io, sessionId, {
+              id: `interim:${sessionId}`,
+              sessionId,
+              text: appendResult.currentTranscriptBuffer,
+              sourceLanguage: liveSession.sourceLanguage,
+              targetLanguage: liveSession.targetLanguage,
+              isFinal: false,
+              sttProvider: transcript.provider,
+              confidence: transcript.confidence,
+              startedAt: new Date(sttReceivedAt).toISOString(),
+              metrics
+            });
+          }
         } else {
           debugInfo("[stt] interim transcript received", {
             sessionId,
             provider: transcript.provider,
             textLength: transcript.text.length
           });
-          scheduleInterimTranslation(io, sessionId, segment);
+          emitSegment(io, sessionId, {
+            id: `interim:${sessionId}`,
+            sessionId,
+            text: transcript.text,
+            sourceLanguage: liveSession.sourceLanguage,
+            targetLanguage: liveSession.targetLanguage,
+            isFinal: false,
+            sttProvider: transcript.provider,
+            confidence: transcript.confidence,
+            startedAt: new Date(sttReceivedAt).toISOString(),
+            metrics
+          });
         }
-
-        emitSegment(io, sessionId, segment);
       };
 
       const startProviderStream = (provider: ActiveSttProvider, message?: string) => {
@@ -637,7 +693,7 @@ export function registerSocketHandlers(io: TranslationServer) {
           },
           onRecoverableError: (error) => {
             const classifiedError = classifySttError(provider, error);
-            console.warn("[stt] recoverable provider error", {
+            console.warn("[stt] chunk failure skipped; microphone continues", {
               sessionId,
               provider,
               code: classifiedError.code,
@@ -657,7 +713,15 @@ export function registerSocketHandlers(io: TranslationServer) {
               provider,
               audioStats: audioChunkStatsBySession.get(sessionId)
             });
-            activeStreams.delete(sessionId);
+            if (activeStreams.get(sessionId) === stream) activeStreams.delete(sessionId);
+            if (streamsPendingFinalFlush.has(stream)) {
+              flushSpecificSegmenter(sessionId, segmenter, "stop_flush");
+              if (transcriptSegmentersBySession.get(sessionId) === segmenter) {
+                disposeSessionSegmenter(sessionId);
+              } else {
+                segmenter.dispose();
+              }
+            }
           }
         });
 
@@ -742,11 +806,34 @@ export function registerSocketHandlers(io: TranslationServer) {
     });
 
     socket.on("audio:stop", ({ sessionId }) => {
-      activeStreams.get(sessionId)?.stop();
+      const liveSession = sessionStore.getLive(sessionId);
+      if (!liveSession || liveSession.hostSocketId !== socket.id) return;
+      console.info("[socket] audio:stop requested; waiting for final STT chunks", { sessionId });
+      stoppingSessions.add(sessionId);
+      scheduleSegmenterCleanup(sessionId);
+      const stream = activeStreams.get(sessionId);
+      if (stream) streamsPendingFinalFlush.add(stream);
+      stream?.stop();
       resetAudioState(sessionId);
+      if (!stream) {
+        flushTranscriptBuffer(sessionId, "stop_flush");
+        disposeSessionSegmenter(sessionId);
+      }
     });
 
     socket.on("session:leave", ({ sessionId }) => {
+      if (socket.data.role === "host") {
+        stoppingSessions.add(sessionId);
+        scheduleSegmenterCleanup(sessionId);
+        const stream = activeStreams.get(sessionId);
+        if (stream) streamsPendingFinalFlush.add(stream);
+        stream?.stop();
+        resetAudioState(sessionId);
+        if (!stream) {
+          flushTranscriptBuffer(sessionId, "stop_flush");
+          disposeSessionSegmenter(sessionId);
+        }
+      }
       socket.leave(roomName(sessionId));
       const changedSessions = sessionStore.leaveSocket(socket.id);
       for (const session of changedSessions) {
@@ -762,8 +849,16 @@ export function registerSocketHandlers(io: TranslationServer) {
       });
       const sessionId = socket.data.sessionId;
       if (socket.data.role === "host" && sessionId) {
-        activeStreams.get(sessionId)?.stop();
+        stoppingSessions.add(sessionId);
+        scheduleSegmenterCleanup(sessionId);
+        const stream = activeStreams.get(sessionId);
+        if (stream) streamsPendingFinalFlush.add(stream);
+        stream?.stop();
         resetAudioState(sessionId);
+        if (!stream) {
+          flushTranscriptBuffer(sessionId, "stop_flush");
+          disposeSessionSegmenter(sessionId);
+        }
       }
 
       const changedSessions = sessionStore.detachSocket(socket.id);

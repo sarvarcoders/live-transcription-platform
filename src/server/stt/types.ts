@@ -4,6 +4,7 @@ import type { LanguageCode } from "@/shared/languages";
 export interface SttTranscript {
   text: string;
   isFinal: boolean;
+  speechFinal?: boolean;
   confidence?: number;
   provider: ActiveSttProvider;
 }

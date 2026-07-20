@@ -30,6 +30,10 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
+function isExportableSegment(segment: TranscriptSegment) {
+  return segment.isFinal && segment.translationStatus === "complete" && Boolean(segment.translatedText);
+}
+
 export function exportTranscriptTxt(session: SessionSummary | null, segments: TranscriptSegment[]) {
   const title = session?.title ?? "Live Transcription Session";
   const source = session ? getLanguageLabel(session.sourceLanguage) : "Transcript";
@@ -44,7 +48,7 @@ export function exportTranscriptTxt(session: SessionSummary | null, segments: Tr
     .join("\n");
 
   const body = segments
-    .filter((segment) => segment.isFinal)
+    .filter(isExportableSegment)
     .map((segment, index) => {
       const translation = segment.translatedText ? `\n${target}: ${segment.translatedText}` : "";
       return `${index + 1}. [${new Date(segment.startedAt).toLocaleTimeString()}]\n${source}: ${segment.text}${translation}`;
@@ -55,7 +59,7 @@ export function exportTranscriptTxt(session: SessionSummary | null, segments: Tr
 }
 
 export function exportTranscriptSrt(session: SessionSummary | null, segments: TranscriptSegment[]) {
-  const finalSegments = segments.filter((segment) => segment.isFinal);
+  const finalSegments = segments.filter(isExportableSegment);
   const baseTime = finalSegments[0]?.startedAt ? new Date(finalSegments[0].startedAt).getTime() : Date.now();
 
   const content = finalSegments
