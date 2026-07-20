@@ -5,7 +5,6 @@ import type { UiCopy } from "@/lib/i18n";
 import type { SessionSummary } from "@/shared/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { SessionDetails } from "./session-details";
 
 interface ViewerControlsProps {
   sessionId: string;
@@ -25,15 +24,18 @@ export function ViewerControls({
   copy
 }: ViewerControlsProps) {
   return (
-    <section className="grid gap-4 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="grid gap-3 rounded-2xl border border-slate-200/80 bg-white/80 p-3 shadow-soft dark:border-slate-800 dark:bg-slate-900/80">
       <div>
-        <h2 className="text-base font-semibold text-slate-950 dark:text-white">{copy.viewerControls}</h2>
-        <p className="text-sm leading-6 text-slate-500 dark:text-slate-400">{copy.viewerDescription}</p>
+        <h2 className="text-sm font-bold text-slate-950 dark:text-white">{copy.viewerControls}</h2>
+        {!session ? <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{copy.viewerDescription}</p> : null}
       </div>
 
       {session ? (
         <>
-          <SessionDetails session={session} copy={copy} />
+          <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-950">
+            <p className="text-[0.65rem] font-bold uppercase tracking-wide text-slate-500">{copy.sessionCode}</p>
+            <p className="mt-0.5 font-mono text-lg font-bold tracking-[0.12em] text-slate-950 dark:text-white">{session.code}</p>
+          </div>
           <Button type="button" variant="secondary" onClick={onLeaveSession}>
             {copy.leaveSession}
           </Button>

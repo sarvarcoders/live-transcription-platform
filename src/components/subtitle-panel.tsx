@@ -1,10 +1,9 @@
 "use client";
 
-import { Captions, Maximize2, Minimize2, Radio } from "lucide-react";
+import { ArrowRight, Minimize2 } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import { getLocalizedLanguageLabel } from "@/lib/language-labels";
-import { formatTime } from "@/lib/utils";
-import type { ActiveSttProvider, ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
+import type { ConnectionState, SessionSummary, TranscriptSegment } from "@/shared/types";
 import { cn } from "@/lib/utils";
 
 interface SubtitlePanelProps {
@@ -15,9 +14,9 @@ interface SubtitlePanelProps {
   isTranslationPending?: boolean;
   lastFinalTranslation?: string | null;
   isRecording: boolean;
+  audioLevel?: number;
   connectionState: ConnectionState;
   session: SessionSummary | null;
-  selectedSttProvider?: ActiveSttProvider | null;
   copy: UiCopy;
   isFocusMode?: boolean;
   onToggleFocus?: () => void;
@@ -31,144 +30,109 @@ export function SubtitlePanel({
   isTranslationPending,
   lastFinalTranslation,
   isRecording,
+  audioLevel = 0,
   connectionState,
   session,
-  selectedSttProvider,
   copy,
   isFocusMode,
   onToggleFocus
 }: SubtitlePanelProps) {
   const liveSegment = pendingTranslation ?? interimSegment ?? segments.at(-1) ?? null;
-  const recentSegments = segments.slice(-3);
-  const isConnected = connectionState === "connected";
-  const translationPending = copy.translationInProgress;
   const displayTranslation = lastDisplayedTranslation ?? lastFinalTranslation ?? null;
   const showPendingIndicator = Boolean(isTranslationPending || (liveSegment && !liveSegment.translatedText));
-  const activeProvider = selectedSttProvider ?? session?.activeSttProvider;
-  const providerLabel = activeProvider
-    ? activeProvider === "google"
-      ? copy.sttGoogle
-      : activeProvider === "openai"
-        ? copy.sttOpenai
-        : activeProvider === "uzbekvoice"
-          ? copy.sttUzbekVoice
-          : copy.sttDeepgram
-    : null;
-  const isDeepgramUzbekTest = activeProvider === "deepgram" && session?.sourceLanguage === "uz";
-  const isUzbekVoiceChunked = activeProvider === "uzbekvoice";
+  const previousTranslations = segments
+    .filter((segment) => segment.isFinal && segment.translatedText && segment.translatedText !== displayTranslation)
+    .slice(-2);
+  const sourceLabel = session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : null;
+  const targetLabel = session ? getLocalizedLanguageLabel(session.targetLanguage, copy) : null;
+  const isReconnecting = connectionState === "connecting" || connectionState === "reconnecting";
+
+  const emptyTitle = !session
+    ? copy.readyToTranslate
+    : isRecording
+      ? copy.listeningTitle
+      : copy.microphoneReadyTitle;
+  const emptyDescription = !session
+    ? copy.readyToTranslateDescription
+    : isRecording
+      ? copy.listeningDescription
+      : copy.startSpeakingDescription;
 
   return (
     <section
       className={cn(
-        "flex flex-col overflow-hidden rounded-2xl border border-slate-800/70 bg-slate-950 shadow-2xl shadow-slate-950/25",
-        isFocusMode ? "min-h-[calc(100vh-1rem)] sm:min-h-[calc(100vh-2rem)]" : "min-h-[36rem] xl:min-h-[calc(100vh-8.25rem)]"
+        "flex min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950 shadow-2xl shadow-slate-950/25",
+        isFocusMode ? "min-h-[calc(100vh-1rem)] rounded-none border-0 sm:min-h-[calc(100vh-2rem)] sm:rounded-2xl sm:border" : "min-h-[38rem] xl:min-h-[calc(100vh-7.25rem)]"
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.025] px-4 py-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-200">{copy.liveTranscript}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wide",
-              isRecording
-                ? "border-rose-400/40 bg-rose-500/15 text-rose-100"
-                : isConnected
-                  ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
-                  : "border-white/10 bg-white/5 text-slate-300"
-            )}
+      <div className="flex min-h-12 items-center justify-between gap-3 border-b border-white/10 bg-white/[0.025] px-4 py-2.5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">{copy.liveTranscript}</p>
+        {isFocusMode && onToggleFocus ? (
+          <button
+            type="button"
+            onClick={onToggleFocus}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-cyan-300"
           >
-            <span
-              className={cn(
-                "h-2.5 w-2.5 rounded-full",
-                isRecording ? "animate-pulse bg-rose-400" : isConnected ? "bg-emerald-400" : "bg-slate-500"
-              )}
-            />
-            {isRecording ? copy.live : isConnected ? copy.connected : copy.standby}
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200">
-            <Radio className="h-3.5 w-3.5" />
-            {session ? getLocalizedLanguageLabel(session.sourceLanguage, copy) : copy.noSession}
-          </span>
-          {providerLabel ? (
-            <span className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
-              STT: {providerLabel}{isDeepgramUzbekTest ? " / Uzbek test" : ""}{isUzbekVoiceChunked ? " / chunked" : ""}
-            </span>
-          ) : null}
-          {onToggleFocus ? (
-            <button
-              type="button"
-              onClick={onToggleFocus}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
-            >
-              {isFocusMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-              {isFocusMode ? copy.exitFocus : copy.focusMode}
-            </button>
+            <Minimize2 className="h-3.5 w-3.5" />
+            {copy.exitFocus}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="relative flex flex-1 items-end justify-center overflow-hidden px-5 pb-[12%] pt-12 sm:px-10 lg:px-14">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_18%,rgba(14,165,233,0.13),transparent_32rem),linear-gradient(145deg,#020617_0%,#0a1830_52%,#101827_100%)]" />
+        <div className="relative z-10 mx-auto grid w-full max-w-6xl gap-5 text-center">
+          {displayTranslation ? (
+            <>
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-semibold text-slate-400">
+                {sourceLabel && targetLabel ? (
+                  <span className="inline-flex items-center gap-2">
+                    {sourceLabel}
+                    <ArrowRight className="h-3.5 w-3.5 text-cyan-300" />
+                    {targetLabel}
+                  </span>
+                ) : null}
+                {isReconnecting ? <span className="text-amber-200">{copy.globalStatusReconnecting}</span> : null}
+              </div>
+              <p className="mx-auto max-w-5xl text-balance font-display text-4xl font-semibold leading-[1.12] text-white sm:text-5xl lg:text-6xl 2xl:text-7xl">
+                {displayTranslation}
+              </p>
+              {showPendingIndicator ? (
+                <p className="mx-auto rounded-full border border-violet-300/20 bg-violet-300/10 px-3 py-1.5 text-xs font-bold text-violet-100">
+                  {copy.translationInProgress}
+                </p>
+              ) : null}
+            </>
           ) : (
-            <Captions className="h-5 w-5 text-cyan-200" />
+            <div className="mx-auto grid max-w-2xl gap-3">
+              <p className="font-display text-3xl font-semibold text-white sm:text-5xl">{emptyTitle}</p>
+              <p className="text-base leading-7 text-slate-400">{emptyDescription}</p>
+              {session && sourceLabel && targetLabel ? (
+                <p className="mx-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300">
+                  {sourceLabel}<ArrowRight className="h-3.5 w-3.5 text-cyan-300" />{targetLabel}
+                </p>
+              ) : null}
+              {isRecording ? (
+                <div className="mx-auto mt-2 w-full max-w-sm" role="meter" aria-label={copy.inputLevel} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(audioLevel * 100)}>
+                  <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                    <div className="h-full rounded-full bg-cyan-400 transition-[width] duration-75" style={{ width: `${Math.max(0, Math.min(100, audioLevel * 100))}%` }} />
+                  </div>
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
       </div>
 
-      <div className="relative grid flex-1 place-items-center overflow-hidden px-5 py-8 sm:px-10 lg:px-14">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(34,211,238,0.18),transparent_32rem),linear-gradient(135deg,#020617_0%,#0f172a_48%,#111827_100%)]" />
-        <div className="pointer-events-none absolute inset-x-10 top-8 h-px bg-gradient-to-r from-transparent via-cyan-300/30 to-transparent" />
-
-        {liveSegment ? (
-          <div className="relative mx-auto grid w-full max-w-7xl gap-5 text-center">
-            <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-medium text-slate-400">
-              <span>{formatTime(liveSegment.startedAt)}</span>
-              <span className="h-1 w-1 rounded-full bg-slate-600" />
-              <span>{session ? getLocalizedLanguageLabel(session.targetLanguage, copy) : getLocalizedLanguageLabel(liveSegment.targetLanguage, copy)}</span>
-              {!liveSegment.isFinal ? (
-                <span className="rounded-full bg-amber-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-amber-100">
-                  {copy.interim}
-                </span>
-              ) : (
-                <span className="rounded-full bg-emerald-300/15 px-2.5 py-1 font-bold uppercase tracking-wide text-emerald-100">
-                  {copy.final}
-                </span>
-              )}
-            </div>
-            {displayTranslation ? (
-              <p
-                className={cn(
-                  "mx-auto max-w-7xl text-balance font-display text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
-                  liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
-                )}
-              >
-                {displayTranslation}
-              </p>
-            ) : null}
-            {showPendingIndicator ? (
-              <p className="mx-auto rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100">
-                {translationPending}
-              </p>
-            ) : null}
-            {isUzbekVoiceChunked ? (
-              <p className="mx-auto text-sm font-medium text-slate-400">{copy.uzbekVoiceLatencyNote}</p>
-            ) : null}
-          </div>
-        ) : (
-          <div className="relative grid gap-3 text-center">
-            <p className="font-display text-3xl font-semibold text-white sm:text-5xl">{copy.waitingForSpeech}</p>
-            <p className="text-base text-slate-400">{copy.transcriptWillAppear}</p>
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-white/10 bg-white/[0.025] px-4 py-3">
-        {recentSegments.length > 0 ? (
-          <div className="grid gap-1.5">
-            {recentSegments.map((segment) => (
-              <p key={segment.id} className="truncate rounded-lg px-3 py-1.5 text-sm text-slate-400">
-                {segment.translatedText || translationPending}
-              </p>
+      <div className="min-h-14 border-t border-white/10 bg-white/[0.025] px-4 py-3">
+        {previousTranslations.length > 0 ? (
+          <div className="grid gap-1 text-center">
+            {previousTranslations.map((segment) => (
+              <p key={segment.id} className="truncate text-sm text-slate-500">{segment.translatedText}</p>
             ))}
           </div>
         ) : (
-          <p className="text-center text-sm text-slate-500">{copy.finalSnippets}</p>
+          <p className="text-center text-xs text-slate-600">{session ? copy.finalSnippets : copy.readyToTranslateDescription}</p>
         )}
       </div>
     </section>

@@ -24,6 +24,14 @@ interface CreativeSelectProps<TValue extends string> {
   menuAlign?: "left" | "right";
 }
 
+function findEnabledIndex(options: Array<{ disabled?: boolean }>, startIndex: number, direction: 1 | -1) {
+  for (let offset = 1; offset <= options.length; offset += 1) {
+    const index = (startIndex + direction * offset + options.length) % options.length;
+    if (!options[index]?.disabled) return index;
+  }
+  return startIndex;
+}
+
 export function CreativeSelect<TValue extends string>({
   id,
   value,
@@ -37,6 +45,7 @@ export function CreativeSelect<TValue extends string>({
 }: CreativeSelectProps<TValue>) {
   const [isOpen, setIsOpen] = useState(false);
   const [menuPlacement, setMenuPlacement] = useState<"top" | "bottom">("bottom");
+  const [activeIndex, setActiveIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
   const selectedOption = options.find((option) => option.value === value) ?? options[0];
@@ -60,7 +69,24 @@ export function CreativeSelect<TValue extends string>({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsOpen(false);
+        rootRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveIndex((current) => findEnabledIndex(options, current, event.key === "ArrowDown" ? 1 : -1));
+      }
+      if (event.key === "Enter") {
+        const activeOption = options[activeIndex];
+        if (activeOption && !activeOption.disabled) {
+          event.preventDefault();
+          onChange(activeOption.value);
+          setIsOpen(false);
+          rootRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        }
+      }
     }
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -75,7 +101,13 @@ export function CreativeSelect<TValue extends string>({
       window.removeEventListener("resize", updateMenuPlacement);
       window.removeEventListener("scroll", updateMenuPlacement, true);
     };
-  }, [isOpen, options.length]);
+  }, [activeIndex, isOpen, onChange, options]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const selectedIndex = options.findIndex((option) => option.value === value && !option.disabled);
+    setActiveIndex(selectedIndex >= 0 ? selectedIndex : findEnabledIndex(options, -1, 1));
+  }, [isOpen, options, value]);
 
   const isSmall = size === "compact" || size === "pair";
 
@@ -84,12 +116,20 @@ export function CreativeSelect<TValue extends string>({
       <button
         id={id}
         type="button"
+        role="combobox"
         disabled={disabled}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={listboxId}
+        aria-activedescendant={isOpen ? `${listboxId}-${activeIndex}` : undefined}
         onClick={() => setIsOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (!isOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+            event.preventDefault();
+            setIsOpen(true);
+          }
+        }}
         className={cn(
           "group relative flex min-w-0 w-full items-center overflow-hidden border text-left text-sm font-semibold shadow-sm outline-none transition",
           size === "compact"
@@ -147,18 +187,20 @@ export function CreativeSelect<TValue extends string>({
         >
           <div className="pointer-events-none absolute inset-x-3 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
           <div className="max-h-60 overflow-y-auto overscroll-contain pr-0.5">
-            {options.map((option) => {
+            {options.map((option, index) => {
               const OptionIcon = option.Icon ?? Icon;
               const isSelected = option.value === value;
 
               return (
                 <button
                   key={option.value}
+                  id={`${listboxId}-${index}`}
                   type="button"
                   role="option"
                   disabled={option.disabled}
                   aria-selected={isSelected}
                   aria-disabled={option.disabled}
+                  onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => {
                     if (option.disabled) return;
                     onChange(option.value);
@@ -171,7 +213,8 @@ export function CreativeSelect<TValue extends string>({
                       : size === "compact"
                         ? "text-slate-200 hover:bg-white/10"
                         : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-white/10",
-                    option.disabled && "cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent"
+                    option.disabled && "cursor-not-allowed opacity-45 hover:bg-transparent dark:hover:bg-transparent",
+                    index === activeIndex && !option.disabled && "ring-1 ring-inset ring-cyan-300/70 dark:ring-cyan-400/40"
                   )}
                 >
                   {OptionIcon ? (

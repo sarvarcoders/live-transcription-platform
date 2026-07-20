@@ -1,13 +1,13 @@
 "use client";
 
-import { Mic, Radio, Square } from "lucide-react";
+import { LogOut, Mic, Plus, Square } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
 import type { ConnectionState, SessionSummary, SttProvider } from "@/shared/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { LanguagePair } from "./language-pair";
-import { SessionDetails } from "./session-details";
+import { MicrophoneControls, type MicrophoneUiStatus } from "./microphone-controls";
 import { SttProviderSelect } from "./stt-provider-select";
 
 export type BroadcasterStatus = "idle" | "creating" | "ready" | "recording" | "stopped" | "error";
@@ -24,12 +24,18 @@ interface HostControlsProps {
   connectionState: ConnectionState;
   status: BroadcasterStatus;
   error?: string | null;
+  selectedMicrophoneId: string;
+  microphoneStatus: MicrophoneUiStatus;
+  audioLevel: number;
   copy: UiCopy;
   onTitleChange: (title: string) => void;
   onSourceLanguageChange: (language: LanguageCode) => void;
   onTargetLanguageChange: (language: LanguageCode) => void;
   onSwapLanguages: () => void;
   onSttProviderChange: (provider: SttProvider) => void;
+  onMicrophoneDeviceChange: (deviceId: string) => void;
+  onMicrophoneStatusChange: (status: MicrophoneUiStatus) => void;
+  onMicrophoneError: (message: string) => void;
   onCreateSession: () => void;
   onStartRecording: () => void;
   onStopRecording: () => void;
@@ -48,12 +54,18 @@ export function HostControls({
   connectionState,
   status,
   error,
+  selectedMicrophoneId,
+  microphoneStatus,
+  audioLevel,
   copy,
   onTitleChange,
   onSourceLanguageChange,
   onTargetLanguageChange,
   onSwapLanguages,
   onSttProviderChange,
+  onMicrophoneDeviceChange,
+  onMicrophoneStatusChange,
+  onMicrophoneError,
   onCreateSession,
   onStartRecording,
   onStopRecording,
@@ -75,30 +87,33 @@ export function HostControls({
     hasBroadcasterToken &&
     !isRecording &&
     isConnected &&
-    (status === "ready" || status === "stopped") &&
-    !error;
+    (status === "ready" || status === "stopped" || status === "error") &&
+    microphoneStatus !== "missing";
   const startDisabledReason = !hasSession
     ? copy.createFirst
     : !hasBroadcasterToken
       ? copy.missingToken
       : !isConnected
         ? copy.socketNotConnected
-        : error
-          ? copy.resolveError
-          : !(status === "ready" || status === "stopped")
+        : microphoneStatus === "missing"
+          ? copy.noMicrophone
+          : !(status === "ready" || status === "stopped" || status === "error")
             ? `${copy.currentStatus}: ${statusLabels[status]}.`
             : undefined;
+  const primaryDisabled = isRecording ? false : isCreating || (hasSession ? !canStart : !canCreate);
+  const primaryLabel = isCreating
+    ? copy.creatingSession
+    : isRecording
+      ? copy.stopRecording
+      : hasSession
+        ? status === "stopped"
+          ? copy.resumeMicrophone
+          : copy.startMicrophone
+        : copy.createSession;
+  const PrimaryIcon = isRecording ? Square : hasSession ? Mic : Plus;
 
-  const statusTone =
-    status === "recording"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : status === "ready" || status === "stopped"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-        : status === "error"
-          ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-slate-200 bg-white text-slate-600";
   return (
-    <section className="grid min-w-0 gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="grid min-w-0 gap-3 rounded-2xl border border-slate-200/80 bg-white/80 p-3 shadow-soft dark:border-slate-800 dark:bg-slate-900/80">
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
         {copy.sessionTitle}
         <Input
@@ -113,50 +128,53 @@ export function HostControls({
         sourceLanguage={sourceLanguage}
         targetLanguage={targetLanguage}
         copy={copy}
-        disabled={hasSession}
+        disabled={hasSession || isRecording}
         onSourceLanguageChange={onSourceLanguageChange}
         onTargetLanguageChange={onTargetLanguageChange}
         onSwap={onSwapLanguages}
+      />
+
+      <MicrophoneControls
+        selectedDeviceId={selectedMicrophoneId}
+        isRecording={isRecording}
+        recordingLevel={audioLevel}
+        disabled={isCreating}
+        copy={copy}
+        onDeviceChange={onMicrophoneDeviceChange}
+        onStatusChange={onMicrophoneStatusChange}
+        onError={onMicrophoneError}
       />
 
       <SttProviderSelect
         sourceLanguage={sourceLanguage}
         value={sttProvider}
         copy={copy}
-        disabled={hasSession}
+        disabled={hasSession || isRecording}
         onChange={onSttProviderChange}
       />
 
-      {session ? <SessionDetails session={session} copy={copy} /> : null}
-
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/60">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{copy.status}</span>
-        <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${statusTone}`}>
-          <span className={`h-2 w-2 rounded-full ${isRecording ? "animate-pulse bg-rose-500" : isConnected ? "bg-emerald-500" : "bg-slate-400"}`} />
-          {statusLabels[status]}
-        </span>
-      </div>
-
       <div className="grid gap-2">
-        <Button type="button" onClick={onCreateSession} disabled={!canCreate} className="w-full">
-          {isCreating ? copy.creatingSession : hasSession ? copy.sessionReady : copy.createSession}
+        <Button
+          type="button"
+          variant={isRecording ? "danger" : "primary"}
+          onClick={isRecording ? onStopRecording : hasSession ? onStartRecording : onCreateSession}
+          disabled={primaryDisabled}
+          className="w-full py-3"
+        >
+          <PrimaryIcon className="h-4 w-4" />
+          {primaryLabel}
         </Button>
 
-        {isRecording ? (
-          <Button type="button" variant="danger" onClick={onStopRecording} className="w-full">
-            <Square className="h-4 w-4" />
-            {copy.stopRecording}
-          </Button>
-        ) : (
-          <Button type="button" onClick={onStartRecording} disabled={!canStart} className="w-full">
-            <Mic className="h-4 w-4" />
-            {copy.startMicrophone}
-          </Button>
-        )}
-
         {session ? (
-          <Button type="button" variant="secondary" onClick={onLeaveSession} className="w-full">
-            <Radio className="h-4 w-4" />
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              if (window.confirm(copy.confirmEndSession)) onLeaveSession();
+            }}
+            className="w-full text-rose-700 dark:text-rose-300"
+          >
+            <LogOut className="h-4 w-4" />
             {copy.endSession}
           </Button>
         ) : null}
@@ -165,7 +183,7 @@ export function HostControls({
       {hasSession && !isRecording && !isConnected ? (
         <p className="text-xs text-amber-700 dark:text-amber-300">{copy.waitingConnection}</p>
       ) : null}
-      {!canStart && hasSession && !isRecording ? (
+      {!canStart && hasSession && !isRecording && startDisabledReason ? (
         <p className="text-xs text-slate-600 dark:text-slate-400">{copy.startDisabled}: {startDisabledReason}</p>
       ) : null}
       {!hasSession && error ? (

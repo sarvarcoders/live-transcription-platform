@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Maximize2 } from "lucide-react";
+import { Maximize2, PanelRightOpen } from "lucide-react";
 import { uiCopy, type UiLocale, type UiTheme } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import type { LanguageCode } from "@/shared/languages";
-import type { SttProvider } from "@/shared/types";
+import type { ActiveSttProvider, SttProvider } from "@/shared/types";
 import { useLiveTranscription } from "@/hooks/use-live-transcription";
-import { ConnectionStatus } from "./connection-status";
-import { ExportControls } from "./export-controls";
 import { type BroadcasterStatus, HostControls } from "./host-controls";
 import { PreferenceControls } from "./preference-controls";
 import { SubtitlePanel } from "./subtitle-panel";
-import { TranscriptHistory } from "./transcript-history";
 import { ViewerControls } from "./viewer-controls";
 import { BrandLogo } from "./brand-logo";
+import { ContextSidebar } from "./context-sidebar";
+import { GlobalLiveStatus, type GlobalLiveStatusKind } from "./global-live-status";
+import { LiveErrorToast } from "./live-error-toast";
+import type { MicrophoneUiStatus } from "./microphone-controls";
 
 type Mode = "broadcaster" | "viewer";
 
@@ -43,11 +45,11 @@ function getBroadcasterStatus(input: {
   hasError: boolean;
   wasRecording: boolean;
 }): BroadcasterStatus {
-  if (input.hasError) return "error";
   if (input.isRecording) return "recording";
   if (input.isCreating) return "creating";
   if (input.wasRecording && input.hasSession) return "stopped";
   if (input.hasSession) return "ready";
+  if (input.hasError) return "error";
   return "idle";
 }
 
@@ -64,6 +66,9 @@ export function TranscriptionStudio() {
   const [formError, setFormError] = useState<string | null>(null);
   const [hasRecorded, setHasRecorded] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
+  const [microphoneStatus, setMicrophoneStatus] = useState<MicrophoneUiStatus>("unknown");
 
   const live = useLiveTranscription();
   const copy = uiCopy[locale];
@@ -75,6 +80,28 @@ export function TranscriptionStudio() {
     hasError: Boolean(visibleError),
     wasRecording: hasRecorded
   });
+  const resolvedProvider: ActiveSttProvider | null =
+    live.selectedSttProvider ??
+    live.session?.activeSttProvider ??
+    (sttProvider === "auto" ? (sourceLanguage === "uz" ? "openai" : "deepgram") : sttProvider);
+  const latestLatencyMs = live.latencySamples.at(-1)?.totalLatencyMs;
+  const hasContext = Boolean(live.session || live.segments.some((segment) => segment.isFinal));
+  const globalStatus: GlobalLiveStatusKind =
+    live.connectionState === "reconnecting" || (live.connectionState === "connecting" && Boolean(live.session))
+      ? "reconnecting"
+      : isCreating
+        ? "creating"
+        : live.isTranslationPending
+          ? "translating"
+          : live.isRecording
+            ? "listening"
+            : live.session
+              ? hasRecorded
+                ? "paused"
+                : "ready"
+              : visibleError
+                ? "error"
+                : "setup";
 
   useEffect(() => {
     const storedLocale = window.localStorage.getItem("live-ui-locale");
@@ -116,6 +143,18 @@ export function TranscriptionStudio() {
       setMode("broadcaster");
     }
   }, [live.role, live.session]);
+
+  useEffect(() => {
+    if (live.session?.id) setContextOpen(true);
+  }, [live.session?.id]);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && focusMode) setFocusMode(false);
+    }
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [focusMode]);
 
   async function createSession() {
     console.info("[frontend] Create session clicked", {
@@ -195,38 +234,35 @@ export function TranscriptionStudio() {
   }
 
   function switchMode(nextMode: Mode) {
+    if (nextMode === mode) return;
     live.leaveSession();
     setFormError(null);
     setMode(nextMode);
   }
 
-  if (focusMode) {
-    return (
-      <main className="min-h-screen bg-slate-950 p-2 sm:p-4">
-        <SubtitlePanel
-          segments={live.segments}
-          interimSegment={live.interimSegment}
-          lastDisplayedTranslation={live.lastDisplayedTranslation}
-          pendingTranslation={live.pendingTranslation}
-          isTranslationPending={live.isTranslationPending}
-          lastFinalTranslation={live.lastFinalTranslation}
-          isRecording={live.isRecording}
-          connectionState={live.connectionState}
-          session={live.session}
-          selectedSttProvider={live.selectedSttProvider}
-          copy={copy}
-          isFocusMode
-          onToggleFocus={() => setFocusMode(false)}
-        />
-      </main>
-    );
-  }
-
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5">
-      <header className="relative z-30 flex flex-col justify-between gap-4 rounded-3xl border border-white/70 bg-slate-50/[0.88] px-5 py-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
+    <main
+      className={cn(
+        "mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5",
+        focusMode && "max-w-none bg-slate-950 p-2 sm:p-4"
+      )}
+    >
+      <header
+        className={cn(
+          "relative z-30 flex min-h-20 flex-col justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white/85 px-4 py-2.5 shadow-soft dark:border-slate-800 dark:bg-slate-900/85 md:flex-row md:items-center",
+          focusMode && "hidden"
+        )}
+      >
         <BrandLogo />
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex flex-wrap items-center gap-2">
+          <GlobalLiveStatus
+            status={globalStatus}
+            connectionState={live.connectionState}
+            microphoneStatus={microphoneStatus}
+            provider={resolvedProvider}
+            latencyMs={latestLatencyMs}
+            copy={copy}
+          />
           <PreferenceControls
             locale={locale}
             theme={theme}
@@ -234,7 +270,18 @@ export function TranscriptionStudio() {
             onLocaleChange={setLocale}
             onThemeChange={setTheme}
           />
-          <ConnectionStatus state={live.connectionState} message={live.connectionMessage} copy={copy} />
+          {hasContext ? (
+            <button
+              type="button"
+              onClick={() => setContextOpen((current) => !current)}
+              aria-expanded={contextOpen}
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200/80 bg-white/90 px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand-200 hover:bg-white focus:outline-none focus:ring-4 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-100 dark:focus:ring-brand-500/20"
+              title={copy.sessionPanel}
+            >
+              <PanelRightOpen className="h-4 w-4" />
+              <span className="hidden sm:inline">{copy.sessionPanel}</span>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setFocusMode(true)}
@@ -246,13 +293,23 @@ export function TranscriptionStudio() {
         </div>
       </header>
 
-      <div className="grid items-start gap-3 lg:grid-cols-[18.5rem_minmax(0,1fr)_18.5rem] 2xl:grid-cols-[18.75rem_minmax(0,1fr)_19.5rem]">
-        <aside className="order-2 grid min-w-0 content-start gap-3 lg:order-1 lg:sticky lg:top-3">
-          <div className="rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+      <div
+        className={cn(
+          "grid items-start gap-3",
+          focusMode
+            ? "grid-cols-1"
+            : contextOpen && hasContext
+              ? "lg:grid-cols-[18.5rem_minmax(0,1fr)] xl:grid-cols-[18.5rem_minmax(0,1fr)_19rem]"
+              : "lg:grid-cols-[18.5rem_minmax(0,1fr)]"
+        )}
+      >
+        <aside className={cn("order-1 grid min-w-0 content-start gap-3 lg:sticky lg:top-3", focusMode && "hidden")}>
+          <div className="rounded-2xl border border-slate-200/80 bg-white/80 p-2 shadow-soft dark:border-slate-800 dark:bg-slate-900/80">
             <div className="grid grid-cols-2 rounded-lg border border-slate-200/80 bg-slate-200/[0.45] p-1 dark:border-slate-700 dark:bg-slate-950/70">
               <button
                 type="button"
                 onClick={() => switchMode("broadcaster")}
+                title={copy.hostModeTooltip}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
                   mode === "broadcaster" ? "bg-white/90 text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
@@ -262,6 +319,7 @@ export function TranscriptionStudio() {
               <button
                 type="button"
                 onClick={() => switchMode("viewer")}
+                title={copy.viewerModeTooltip}
                 className={`rounded-md px-3 py-2 text-sm font-semibold transition ${
                   mode === "viewer" ? "bg-white/90 text-brand-700 shadow-sm dark:bg-slate-800 dark:text-cyan-200" : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}
@@ -284,14 +342,20 @@ export function TranscriptionStudio() {
               connectionState={live.connectionState}
               status={broadcasterStatus}
               error={visibleError}
+              selectedMicrophoneId={selectedMicrophoneId}
+              microphoneStatus={microphoneStatus}
+              audioLevel={live.audioLevel}
               copy={copy}
               onTitleChange={setTitle}
               onSourceLanguageChange={changeSourceLanguage}
               onTargetLanguageChange={changeTargetLanguage}
               onSwapLanguages={swapLanguages}
               onSttProviderChange={setSttProvider}
+              onMicrophoneDeviceChange={setSelectedMicrophoneId}
+              onMicrophoneStatusChange={setMicrophoneStatus}
+              onMicrophoneError={setFormError}
               onCreateSession={createSession}
-              onStartRecording={live.startRecording}
+              onStartRecording={() => live.startRecording({ deviceId: selectedMicrophoneId || undefined })}
               onStopRecording={live.stopRecording}
               onLeaveSession={live.leaveSession}
             />
@@ -305,16 +369,9 @@ export function TranscriptionStudio() {
               copy={copy}
             />
           )}
-
-          {visibleError ? (
-            <div className="rounded-xl border border-rose-200 bg-rose-50/90 px-4 py-3 text-sm text-rose-700 shadow-sm dark:border-rose-900/70 dark:bg-rose-950/60 dark:text-rose-200">
-              {visibleError}
-            </div>
-          ) : null}
-
         </aside>
 
-        <div className="order-1 lg:order-2">
+        <div className={cn("order-2 min-w-0 lg:order-2", focusMode && "order-1")}>
           <SubtitlePanel
             segments={live.segments}
             interimSegment={live.interimSegment}
@@ -323,19 +380,34 @@ export function TranscriptionStudio() {
             isTranslationPending={live.isTranslationPending}
             lastFinalTranslation={live.lastFinalTranslation}
             isRecording={live.isRecording}
+            audioLevel={live.audioLevel}
             connectionState={live.connectionState}
             session={live.session}
-            selectedSttProvider={live.selectedSttProvider}
             copy={copy}
-            onToggleFocus={() => setFocusMode(true)}
+            isFocusMode={focusMode}
+            onToggleFocus={() => setFocusMode(false)}
           />
         </div>
 
-        <aside className="order-3 grid content-start gap-3 lg:sticky lg:top-3">
-          <ExportControls session={live.session} segments={live.segments} copy={copy} />
-          <TranscriptHistory segments={live.segments} copy={copy} />
-        </aside>
+        <ContextSidebar
+          open={!focusMode && contextOpen}
+          session={live.session}
+          segments={live.segments}
+          copy={copy}
+          onClose={() => setContextOpen(false)}
+        />
       </div>
+
+      {visibleError ? (
+        <LiveErrorToast
+          message={visibleError}
+          copy={copy}
+          onDismiss={() => {
+            setFormError(null);
+            live.clearError();
+          }}
+        />
+      ) : null}
     </main>
   );
 }

@@ -20,6 +20,10 @@ type StoredSessionCredentials = {
   reconnectToken: string;
 };
 
+export interface StartRecordingOptions {
+  deviceId?: string;
+}
+
 const SESSION_STORAGE_KEY = "live-translation-session";
 const AUDIO_CHUNK_MS = 75;
 const OPENAI_STT_BROWSER_CHUNK_MS = 3000;
@@ -99,6 +103,10 @@ export function useLiveTranscription() {
   const credentialsRef = useRef<StoredSessionCredentials | null>(null);
   const standaloneChunkingRef = useRef(false);
   const standaloneChunkTimerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioAnalyserRef = useRef<AnalyserNode | null>(null);
+  const audioLevelFrameRef = useRef<number | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [connectionMessage, setConnectionMessage] = useState<string>();
   const [session, setSession] = useState<SessionSummary | null>(null);
@@ -113,6 +121,7 @@ export function useLiveTranscription() {
   const [latencySamples, setLatencySamples] = useState<LatencyMetrics[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
   const [role, setRole] = useState<LiveRole | null>(null);
   const [hasBroadcasterToken, setHasBroadcasterToken] = useState(false);
   const [selectedSttProvider, setSelectedSttProvider] = useState<ActiveSttProvider | null>(null);
@@ -136,6 +145,53 @@ export function useLiveTranscription() {
       standaloneChunkTimerRef.current = null;
     }
   }, []);
+
+  const stopAudioLevelMeter = useCallback(() => {
+    if (audioLevelFrameRef.current) window.cancelAnimationFrame(audioLevelFrameRef.current);
+    audioLevelFrameRef.current = null;
+    audioSourceRef.current?.disconnect();
+    audioAnalyserRef.current?.disconnect();
+    audioSourceRef.current = null;
+    audioAnalyserRef.current = null;
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+    setAudioLevel(0);
+  }, []);
+
+  const startAudioLevelMeter = useCallback(
+    (mediaStream: MediaStream) => {
+      stopAudioLevelMeter();
+      if (typeof AudioContext === "undefined") return;
+
+      try {
+        const audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(mediaStream);
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.72;
+        source.connect(analyser);
+        audioContextRef.current = audioContext;
+        audioSourceRef.current = source;
+        audioAnalyserRef.current = analyser;
+        const samples = new Uint8Array(analyser.fftSize);
+
+        const updateLevel = () => {
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (const sample of samples) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          setAudioLevel(Math.min(1, Math.sqrt(sum / samples.length) * 4));
+          audioLevelFrameRef.current = window.requestAnimationFrame(updateLevel);
+        };
+        updateLevel();
+      } catch {
+        stopAudioLevelMeter();
+      }
+    },
+    [stopAudioLevelMeter]
+  );
 
   const applyDisplayedTranslation = useCallback((segment: TranscriptSegment) => {
     if (!segment.translatedText) return;
@@ -488,7 +544,7 @@ export function useLiveTranscription() {
     [connect, resetTranslationDisplay]
   );
 
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (options?: StartRecordingOptions) => {
     if (!session) {
       setError("Create a transcription session first.");
       return;
@@ -532,6 +588,7 @@ export function useLiveTranscription() {
       const mimeType = getRecorderMimeType();
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          ...(options?.deviceId ? { deviceId: { exact: options.deviceId } } : {}),
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true
@@ -540,6 +597,7 @@ export function useLiveTranscription() {
 
       const recorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
       streamRef.current = mediaStream;
+      startAudioLevelMeter(mediaStream);
       const emitAudioBlob = async (
         blob: Blob,
         capturedAt: number,
@@ -671,10 +729,11 @@ export function useLiveTranscription() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
       recorderRef.current = null;
+      stopAudioLevelMeter();
       setIsRecording(false);
       setError(getMicrophoneErrorMessage(recordingError));
     }
-  }, [clearLocalSessionState, clearStandaloneChunkTimer, role, session, waitForConnectedSocket]);
+  }, [clearLocalSessionState, clearStandaloneChunkTimer, role, session, startAudioLevelMeter, stopAudioLevelMeter, waitForConnectedSocket]);
 
   const stopRecording = useCallback(() => {
     console.info("[frontend] recording stopped by user", {
@@ -690,10 +749,11 @@ export function useLiveTranscription() {
       recorderRef.current?.stop();
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopAudioLevelMeter();
     if (session) socketRef.current?.emit("audio:stop", { sessionId: session.id });
     setIsRecording(false);
     setConnectionMessage(session ? "Session ready. Microphone is stopped." : undefined);
-  }, [clearStandaloneChunkTimer, session]);
+  }, [clearStandaloneChunkTimer, session, stopAudioLevelMeter]);
 
   const leaveSession = useCallback(() => {
     stopRecording();
@@ -734,11 +794,12 @@ export function useLiveTranscription() {
         recorderRef.current?.stop();
       }
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopAudioLevelMeter();
       socketRef.current?.disconnect();
       clearDisplayHoldTimer();
       clearStandaloneChunkTimer();
     };
-  }, [clearDisplayHoldTimer, clearStandaloneChunkTimer]);
+  }, [clearDisplayHoldTimer, clearStandaloneChunkTimer, stopAudioLevelMeter]);
 
   return useMemo(
     () => ({
@@ -756,6 +817,7 @@ export function useLiveTranscription() {
       latencySamples,
       error,
       isRecording,
+      audioLevel,
       role,
       hasBroadcasterToken,
       selectedSttProvider,
@@ -781,6 +843,7 @@ export function useLiveTranscription() {
       latencySamples,
       error,
       isRecording,
+      audioLevel,
       role,
       hasBroadcasterToken,
       selectedSttProvider,
