@@ -16,6 +16,32 @@ const config: Config = {
           700: "#1e40af"
         }
       },
+      fontFamily: {
+        sans: [
+          "Aptos",
+          "Segoe UI Variable",
+          "SF Pro Text",
+          "Inter",
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif"
+        ],
+        display: [
+          "var(--font-montserrat)",
+          "Montserrat",
+          "Aptos",
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif"
+        ],
+        mono: [
+          "Cascadia Code",
+          "SFMono-Regular",
+          "Consolas",
+          "Liberation Mono",
+          "monospace"
+        ]
+      },
       boxShadow: {
         soft: "0 24px 80px rgba(15, 23, 42, 0.10)"
       }

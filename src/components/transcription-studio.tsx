@@ -13,6 +13,7 @@ import { PreferenceControls } from "./preference-controls";
 import { SubtitlePanel } from "./subtitle-panel";
 import { TranscriptHistory } from "./transcript-history";
 import { ViewerControls } from "./viewer-controls";
+import { BrandLogo } from "./brand-logo";
 
 type Mode = "broadcaster" | "viewer";
 
@@ -176,6 +177,23 @@ export function TranscriptionStudio() {
     live.joinSession(joinSessionId);
   }
 
+  function changeSourceLanguage(nextLanguage: LanguageCode) {
+    if (nextLanguage === targetLanguage) setTargetLanguage(sourceLanguage);
+    setSourceLanguage(nextLanguage);
+    if (nextLanguage === "uz" && sttProvider === "deepgram") setSttProvider("auto");
+  }
+
+  function changeTargetLanguage(nextLanguage: LanguageCode) {
+    if (nextLanguage !== sourceLanguage) setTargetLanguage(nextLanguage);
+  }
+
+  function swapLanguages() {
+    const nextSourceLanguage = targetLanguage;
+    setSourceLanguage(nextSourceLanguage);
+    setTargetLanguage(sourceLanguage);
+    if (nextSourceLanguage === "uz" && sttProvider === "deepgram") setSttProvider("auto");
+  }
+
   function switchMode(nextMode: Mode) {
     live.leaveSession();
     setFormError(null);
@@ -206,11 +224,8 @@ export function TranscriptionStudio() {
 
   return (
     <main className="mx-auto grid min-h-screen w-full max-w-[112rem] gap-3 px-3 py-3 sm:px-4 lg:px-5">
-      <header className="relative z-30 flex flex-col justify-between gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] px-4 py-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-600 dark:text-cyan-300">{copy.appEyebrow}</p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-3xl">{copy.appTitle}</h1>
-        </div>
+      <header className="relative z-30 flex flex-col justify-between gap-4 rounded-3xl border border-white/70 bg-slate-50/[0.88] px-5 py-4 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75 md:flex-row md:items-center">
+        <BrandLogo />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <PreferenceControls
             locale={locale}
@@ -231,8 +246,8 @@ export function TranscriptionStudio() {
         </div>
       </header>
 
-      <div className="grid items-start gap-3 lg:grid-cols-[17.5rem_minmax(0,1fr)_18.5rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_19.5rem]">
-        <aside className="order-2 grid content-start gap-3 lg:order-1 lg:sticky lg:top-3">
+      <div className="grid items-start gap-3 lg:grid-cols-[18.5rem_minmax(0,1fr)_18.5rem] 2xl:grid-cols-[18.75rem_minmax(0,1fr)_19.5rem]">
+        <aside className="order-2 grid min-w-0 content-start gap-3 lg:order-1 lg:sticky lg:top-3">
           <div className="rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
             <div className="grid grid-cols-2 rounded-lg border border-slate-200/80 bg-slate-200/[0.45] p-1 dark:border-slate-700 dark:bg-slate-950/70">
               <button
@@ -271,8 +286,9 @@ export function TranscriptionStudio() {
               error={visibleError}
               copy={copy}
               onTitleChange={setTitle}
-              onSourceLanguageChange={setSourceLanguage}
-              onTargetLanguageChange={setTargetLanguage}
+              onSourceLanguageChange={changeSourceLanguage}
+              onTargetLanguageChange={changeTargetLanguage}
+              onSwapLanguages={swapLanguages}
               onSttProviderChange={setSttProvider}
               onCreateSession={createSession}
               onStartRecording={live.startRecording}

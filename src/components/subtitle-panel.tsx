@@ -134,7 +134,7 @@ export function SubtitlePanel({
             {displayTranslation ? (
               <p
                 className={cn(
-                  "mx-auto max-w-7xl text-balance text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
+                  "mx-auto max-w-7xl text-balance font-display text-5xl font-semibold leading-tight tracking-tight sm:text-6xl lg:text-7xl xl:text-8xl",
                   liveSegment.translationStatus === "error" ? "text-rose-200" : "text-white"
                 )}
               >
@@ -152,7 +152,7 @@ export function SubtitlePanel({
           </div>
         ) : (
           <div className="relative grid gap-3 text-center">
-            <p className="text-3xl font-semibold text-white sm:text-5xl">{copy.waitingForSpeech}</p>
+            <p className="font-display text-3xl font-semibold text-white sm:text-5xl">{copy.waitingForSpeech}</p>
             <p className="text-base text-slate-400">{copy.transcriptWillAppear}</p>
           </div>
         )}

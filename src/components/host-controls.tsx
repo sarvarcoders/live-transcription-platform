@@ -1,14 +1,14 @@
 "use client";
 
-import { Bot, Cpu, DatabaseZap, Mic, Radio, Sparkles, Square, Waves } from "lucide-react";
+import { Mic, Radio, Square } from "lucide-react";
 import type { UiCopy } from "@/lib/i18n";
 import type { LanguageCode } from "@/shared/languages";
 import type { ConnectionState, SessionSummary, SttProvider } from "@/shared/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { LanguageSelect } from "./language-select";
+import { LanguagePair } from "./language-pair";
 import { SessionDetails } from "./session-details";
-import { CreativeSelect } from "./ui/creative-select";
+import { SttProviderSelect } from "./stt-provider-select";
 
 export type BroadcasterStatus = "idle" | "creating" | "ready" | "recording" | "stopped" | "error";
 
@@ -28,6 +28,7 @@ interface HostControlsProps {
   onTitleChange: (title: string) => void;
   onSourceLanguageChange: (language: LanguageCode) => void;
   onTargetLanguageChange: (language: LanguageCode) => void;
+  onSwapLanguages: () => void;
   onSttProviderChange: (provider: SttProvider) => void;
   onCreateSession: () => void;
   onStartRecording: () => void;
@@ -51,6 +52,7 @@ export function HostControls({
   onTitleChange,
   onSourceLanguageChange,
   onTargetLanguageChange,
+  onSwapLanguages,
   onSttProviderChange,
   onCreateSession,
   onStartRecording,
@@ -95,16 +97,8 @@ export function HostControls({
         : status === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
           : "border-slate-200 bg-white text-slate-600";
-  const sttProviderOptions = [
-    { value: "auto" as const, label: copy.sttAuto, Icon: Sparkles },
-    { value: "deepgram" as const, label: copy.sttDeepgram, Icon: Waves },
-    { value: "google" as const, label: copy.sttGoogle, Icon: DatabaseZap },
-    { value: "openai" as const, label: copy.sttOpenai, Icon: Bot },
-    { value: "uzbekvoice" as const, label: copy.sttUzbekVoice, Icon: Radio }
-  ];
-
   return (
-    <section className="grid gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
+    <section className="grid min-w-0 gap-3 rounded-2xl border border-white/70 bg-slate-50/[0.85] p-3 shadow-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/75">
       <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
         {copy.sessionTitle}
         <Input
@@ -115,36 +109,23 @@ export function HostControls({
         />
       </label>
 
-      <LanguageSelect
-        id="source-language"
-        label={copy.speakerLanguage}
-        value={sourceLanguage}
+      <LanguagePair
+        sourceLanguage={sourceLanguage}
+        targetLanguage={targetLanguage}
         copy={copy}
         disabled={hasSession}
-        onChange={onSourceLanguageChange}
+        onSourceLanguageChange={onSourceLanguageChange}
+        onTargetLanguageChange={onTargetLanguageChange}
+        onSwap={onSwapLanguages}
       />
 
-      <LanguageSelect
-        id="target-language"
-        label={copy.targetLanguage}
-        value={targetLanguage}
+      <SttProviderSelect
+        sourceLanguage={sourceLanguage}
+        value={sttProvider}
         copy={copy}
         disabled={hasSession}
-        onChange={onTargetLanguageChange}
+        onChange={onSttProviderChange}
       />
-
-      <label className="grid gap-2 text-sm font-medium text-slate-700 dark:text-slate-200" htmlFor="stt-provider">
-        {copy.sttProvider}
-        <CreativeSelect
-          id="stt-provider"
-          value={sttProvider}
-          options={sttProviderOptions}
-          disabled={hasSession}
-          Icon={Cpu}
-          ariaLabel={copy.sttProvider}
-          onChange={(provider) => onSttProviderChange(provider as SttProvider)}
-        />
-      </label>
 
       {session ? <SessionDetails session={session} copy={copy} /> : null}
 

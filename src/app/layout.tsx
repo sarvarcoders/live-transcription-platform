@@ -1,18 +1,25 @@
 import type { Metadata } from "next";
+import { Montserrat } from "next/font/google";
 import { getPublicAppUrl } from "@/lib/site-url";
 import "./globals.css";
 
 const appUrl = getPublicAppUrl();
+const montserrat = Montserrat({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-montserrat",
+  display: "swap"
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
   title: {
-    default: "Live Speech Transcript",
-    template: "%s | Live Speech Transcript"
+    default: "LiveLingo",
+    template: "%s | LiveLingo"
   },
   description:
-    "Real-time browser microphone transcription with Deepgram, OpenAI translation, live subtitles, session sharing, and TXT/SRT export.",
-  applicationName: "Live Speech Transcript",
+    "LiveLingo turns live speech into translated subtitles for shared sessions in real time.",
+  applicationName: "LiveLingo",
   keywords: [
     "live transcription",
     "real-time subtitles",
@@ -20,27 +27,33 @@ export const metadata: Metadata = {
     "Deepgram transcription",
     "OpenAI translation",
     "Uzbek subtitles",
-    "English Uzbek translation"
+    "English Uzbek translation",
+    "LiveLingo"
   ],
-  authors: [{ name: "Live Speech Transcript" }],
-  creator: "Live Speech Transcript",
-  publisher: "Live Speech Transcript",
+  authors: [{ name: "LiveLingo" }],
+  creator: "LiveLingo",
+  publisher: "LiveLingo",
+  icons: {
+    icon: "/brand/livelingo-mark.png",
+    shortcut: "/brand/livelingo-mark.png",
+    apple: "/brand/livelingo-mark.png"
+  },
   alternates: {
     canonical: "/"
   },
   openGraph: {
-    title: "Live Speech Transcript",
+    title: "LiveLingo",
     description:
       "Create a live transcription session, stream microphone audio, and show translated subtitles to unlimited viewers.",
     url: "/",
-    siteName: "Live Speech Transcript",
+    siteName: "LiveLingo",
     type: "website",
     locale: "en_US"
   },
   twitter: {
     card: "summary_large_image",
-    title: "Live Speech Transcript",
-    description: "Real-time Deepgram transcription and OpenAI translated subtitles for live sessions."
+    title: "LiveLingo",
+    description: "Speak, translate, and connect with real-time translated subtitles."
   },
   robots: {
     index: true,
@@ -51,7 +64,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body>{children}</body>
+      <body className={montserrat.variable}>{children}</body>
     </html>
   );
 }
